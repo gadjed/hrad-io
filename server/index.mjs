@@ -35,6 +35,8 @@ function ensureWorld() {
   if (snap) {
     rooms.world.hydrate(snap);
     rooms.world.rebuildOccupancy();
+    rooms.world.repairOccupancyIntegrity();
+    rooms.world.reconcileNpcSettlements();
     rooms.world.catchUp((Date.now() - snap.savedAt) / 1000);
     const before = rooms.world.npcSettlementCount();
     rooms.world.maintainNpcSettlements();

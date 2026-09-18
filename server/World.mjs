@@ -4,6 +4,8 @@ import {
   WORLD_SIZE,
   DT,
   AOI_RADIUS,
+  OCCUPANCY_AUDIT_SEC,
+  LOOT_DESPAWN_SEC,
   PLAYER,
   NPC,
   NODE_TYPES,
@@ -120,12 +122,61 @@ export class World {
       while (placed < n && guard++ < n * 8) {
         const tx = 2 + ((Math.random() * (WORLD_TILES - 4)) | 0);
         const ty = 2 + ((Math.random() * (WORLD_TILES - 4)) | 0);
-        if (this.occupiedKey(tx, ty)) continue;
-        if (this.nodeAt(tx, ty)) continue;
+        if (!this.canSpawnNodeAt(tx, ty)) continue;
         this.spawnNode(kind, tx, ty);
         placed++;
       }
     }
+  }
+
+  /** Чи можна поставити ресурс на тайл (без споруд і без іншого живого вузла). */
+  canSpawnNodeAt(tx, ty, ignoreNodeId = null) {
+    if (tx < 2 || ty < 2 || tx >= WORLD_TILES - 2 || ty >= WORLD_TILES - 2) return false;
+    if (this.occupiedKey(tx, ty)) return false;
+    for (const n of this.nodes.values()) {
+      if (!n.alive || n.id === ignoreNodeId) continue;
+      if (n.tx === tx && n.ty === ty) return false;
+    }
+    return true;
+  }
+
+  findEmptyNodeTile(preferTx, preferTy, maxRing = 28) {
+    if (this.canSpawnNodeAt(preferTx, preferTy)) return { tx: preferTx, ty: preferTy };
+    for (let ring = 1; ring <= maxRing; ring++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        for (let dy = -ring; dy <= ring; dy++) {
+          if (Math.abs(dx) !== ring && Math.abs(dy) !== ring) continue;
+          const tx = preferTx + dx;
+          const ty = preferTy + dy;
+          if (this.canSpawnNodeAt(tx, ty)) return { tx, ty };
+        }
+      }
+    }
+    return null;
+  }
+
+  placeNodeOnTile(node, tx, ty) {
+    node.tx = tx;
+    node.ty = ty;
+    node.x = (tx + 0.5) * TILE;
+    node.y = (ty + 0.5) * TILE;
+  }
+
+  suppressNodeIfUnderBuilding(n) {
+    if (!n.alive) return false;
+    if (!this.occupiedKey(n.tx, n.ty)) return false;
+    const def = NODE_TYPES[n.kind];
+    n.alive = false;
+    n.respawnAt = this.tick + Math.round((def?.respawn ?? 30) / DT);
+    return true;
+  }
+
+  sanitizeAliveNodesVsBuildings() {
+    let fixed = 0;
+    for (const n of this.nodes.values()) {
+      if (this.suppressNodeIfUnderBuilding(n)) fixed++;
+    }
+    return fixed;
   }
 
   spawnNode(kind, tx, ty, saved = null) {
@@ -144,6 +195,10 @@ export class World {
       alive: saved?.alive == null ? true : !!saved.alive,
       respawnAt: saved?.respawnAt ?? 0,
     };
+    if (node.alive && !this.canSpawnNodeAt(tx, ty, node.id)) {
+      node.alive = false;
+      node.respawnAt = this.tick + Math.round(def.respawn / DT);
+    }
     this.nodes.set(node.id, node);
     return node;
   }
@@ -188,6 +243,7 @@ export class World {
 
   maintainNpcSettlements() {
     if (this.mode !== "world") return;
+    this.reconcileNpcSettlements();
     this.pruneDeadNpcFactions();
     this.removeNpcSettlementsOverlappingPlayers();
     const need = WORLD_NPC.settlementCount - this.npcSettlementCount();
@@ -222,8 +278,45 @@ export class World {
     }
   }
 
+  /** Прототипи з цитаделлю — лише вони для NPC-поселень у світі. */
+  npcSettlementPrototypes() {
+    return this.prototypes.all().filter((p) => p.buildings?.some((b) => b.type === "core"));
+  }
+
+  /**
+   * NPC-форт без справжньої цитаделі (зруйнована / битий save) — прибрати залишки.
+   */
+  reconcileNpcSettlements() {
+    if (this.mode !== "world") return 0;
+    let fixes = 0;
+    for (const f of [...this.factions.values()]) {
+      if (!f.npc) continue;
+      const core = this.buildingsOf(f.id).find((b) => b.type === "core") || null;
+      if (!core) {
+        if (this.buildingsOf(f.id).length > 0 || this.npcsOf(f.id).length > 0) {
+          this.destroySettlement(f.id);
+          fixes++;
+        } else {
+          this.factions.delete(f.id);
+          fixes++;
+        }
+        continue;
+      }
+      if (f.core !== core.id) {
+        f.core = core.id;
+        fixes++;
+      }
+    }
+    this.pruneDeadNpcFactions();
+    if (fixes) {
+      this.invalidateKeepsCache();
+      this.rebuildOccupancy();
+    }
+    return fixes;
+  }
+
   placeNpcSettlements(count) {
-    const list = this.prototypes.all();
+    const list = this.npcSettlementPrototypes();
     if (!list.length || count <= 0) return 0;
     let placed = 0;
     for (let i = 0; i < count; i++) {
@@ -234,8 +327,9 @@ export class World {
   }
 
   settlementCoreWorld(proto, ox, oy) {
-    const core = proto.buildings.find((b) => b.type === "core") || proto.buildings[0];
-    const def = BUILDINGS[core.type] || BUILDINGS.core;
+    const core = proto.buildings.find((b) => b.type === "core");
+    if (!core) return null;
+    const def = BUILDINGS.core;
     return {
       x: (ox + core.tx + def.w / 2) * TILE,
       y: (oy + core.ty + def.h / 2) * TILE,
@@ -247,8 +341,9 @@ export class World {
   }
 
   npcProtoKeepRect(proto, ox, oy) {
-    const coreB = proto.buildings.find((b) => b.type === "core") || proto.buildings[0];
-    const def = BUILDINGS[coreB.type] || BUILDINGS.core;
+    const coreB = proto.buildings.find((b) => b.type === "core");
+    if (!coreB) return null;
+    const def = BUILDINGS.core;
     const cx = ox + coreB.tx;
     const cy = oy + coreB.ty;
     const pad = NPC_FACTION.keepTiles;
@@ -269,12 +364,15 @@ export class World {
   }
 
   canStampNpcKeep(proto, ox, oy) {
+    if (!proto.buildings?.some((b) => b.type === "core")) return false;
     if (!this.canStamp(proto, ox, oy)) return false;
     const newKeep = this.npcProtoKeepRect(proto, ox, oy);
+    if (!newKeep) return false;
     for (const keep of this.keepsList()) {
       if (this.keepRectsOverlap(newKeep, keep)) return false;
     }
     const c = this.settlementCoreWorld(proto, ox, oy);
+    if (!c) return false;
     const minDist = this.minNpcCoreSpacingTiles() * TILE;
     const min2 = minDist * minDist;
     for (const b of this.buildings.values()) {
@@ -362,8 +460,13 @@ export class World {
       }
       created.push(building);
     }
-    const core = created.find((b) => b.type === "core") || created[0];
-    if (core) faction.core = core.id;
+    const core = created.find((b) => b.type === "core");
+    if (!core) {
+      for (const x of created) this.destroyBuilding(x, false, true);
+      this.factions.delete(factionId);
+      return [];
+    }
+    faction.core = core.id;
     this.ensureFaction(faction);
     const towers = created.filter((b) => BUILDINGS[b.type]?.turret).length;
     const guards = Math.min(NPC_FACTION.maxGuards, 2 + towers);
@@ -509,9 +612,20 @@ export class World {
   playerCore(ownerId) {
     if (!ownerId) return null;
     for (const b of this.buildings.values()) {
-      if (b.ownerId === ownerId && b.type === "core") return b;
+      if (b.type !== "core") continue;
+      if (b.ownerId === ownerId || b.team === ownerId) return b;
     }
     return null;
+  }
+
+  fortOwnerKeys(fortId, hint = null) {
+    const keys = new Set();
+    if (fortId) keys.add(fortId);
+    if (hint) {
+      if (hint.ownerId) keys.add(hint.ownerId);
+      if (hint.team) keys.add(hint.team);
+    }
+    return keys;
   }
 
   keepForCore(core) {
@@ -728,11 +842,14 @@ export class World {
     const team = typeof f === "string" ? f : f?.id;
     if (id) {
       const b = this.buildings.get(id);
-      if (b) return b;
+      if (b && b.type === "core" && (!team || b.team === team)) return b;
     }
     if (!team) return null;
     for (const b of this.buildings.values()) {
-      if (b.team === team && b.type === "core") return b;
+      if (b.team === team && b.type === "core") {
+        if (typeof f === "object" && f && f.core !== b.id) f.core = b.id;
+        return b;
+      }
     }
     return null;
   }
@@ -748,17 +865,35 @@ export class World {
     return b.team === fortId || b.ownerId === fortId;
   }
 
-  buildingsOf(fortId) {
+  buildingsOf(fortId, hint = null) {
+    const keys = this.fortOwnerKeys(fortId, hint);
+    if (!keys.size) return [];
     const out = [];
     for (const b of this.buildings.values()) {
-      if (this.belongsToFort(b, fortId)) out.push(b);
+      if (keys.has(b.team) || keys.has(b.ownerId)) out.push(b);
     }
     return out;
   }
 
-  destroySettlement(fortId, { spillOrigin = null } = {}) {
-    if (!fortId) return;
-    const batch = this.buildingsOf(fortId);
+  applyPlayerFortLoss(ownerId, origin) {
+    if (!this.isPlayerTeam(ownerId)) return;
+    if (origin) this.spillTreasury(ownerId, origin.x, origin.y);
+    else {
+      const acc = this.accounts.get(ownerId);
+      const p = this.players.get(ownerId);
+      if (acc) acc.treasury = emptyStock();
+      if (p) p.treasury = emptyStock();
+    }
+    const p = this.players.get(ownerId);
+    if (p?.alive) this.killPlayer(p);
+    this.toast(ownerId, "Цитадель зруйновано — усі споруди зникли");
+    const bot = this.bots.get(ownerId);
+    if (bot?.alive) this.killBot(bot);
+  }
+
+  destroySettlement(fortId, { spillOrigin = null, fortHint = null } = {}) {
+    const ownerId = spillOrigin?.ownerId || fortHint?.ownerId || fortId;
+    const batch = this.buildingsOf(fortId, fortHint);
     for (const other of batch) this.destroyBuilding(other, false, true);
     const faction = this.factions.get(fortId);
     if (faction?.npc) {
@@ -768,9 +903,10 @@ export class World {
       for (const n of [...this.npcs.values()]) {
         if (n.team === fortId) this.npcs.delete(n.id);
       }
-    } else if (this.isPlayerTeam(fortId) && spillOrigin) {
-      this.spillTreasury(fortId, spillOrigin.x, spillOrigin.y);
+    } else if (this.isPlayerTeam(ownerId)) {
+      this.applyPlayerFortLoss(ownerId, spillOrigin);
     }
+    this.rebuildOccupancy();
   }
 
   gateAxis(gate, core) {
@@ -1269,6 +1405,17 @@ export class World {
     if (this.mode === "world") {
       const period = Math.max(1, Math.round(WORLD_NPC.repopulateSec / DT));
       if (this.tick % period === 0) this.maintainNpcSettlements();
+    }
+    const occEvery = Math.max(1, Math.round(OCCUPANCY_AUDIT_SEC / DT));
+    if (this.tick % occEvery === 0) {
+      const occFixed = this.repairOccupancyIntegrity();
+      const nodeFixed = this.sanitizeAliveNodesVsBuildings();
+      const npcFixed = this.mode === "world" ? this.reconcileNpcSettlements() : 0;
+      if ((occFixed > 0 || nodeFixed > 0 || npcFixed > 0) && !this._silent) {
+        console.log(
+          `[world-audit] occupancy ${occFixed} · nodes ${nodeFixed} · npc ${npcFixed} · tick ${this.tick}`
+        );
+      }
     }
   }
 
@@ -1806,8 +1953,8 @@ export class World {
     };
     this.buildings.set(b.id, b);
     this.markFootprint(fp, b.id);
+    this.clearNodesUnder([b]);
     if (!restore) {
-      this.clearNodesUnder([b]);
       this.ejectUnitsFromFootprint(fp);
     }
     return b;
@@ -1821,9 +1968,90 @@ export class World {
   rebuildOccupancy() {
     this.occupancy.clear();
     for (const b of this.buildings.values()) {
+      this.syncBuildingFootprint(b);
       this.markFootprint({ tx: b.tx, ty: b.ty, w: b.w, h: b.h }, b.id);
     }
     this.invalidateKeepsCache();
+  }
+
+  /** Підганяє w/h і центр споруди під поточні defs (legacy save). */
+  syncBuildingFootprint(b) {
+    const def = BUILDINGS[b.type];
+    if (!def) return false;
+    const fp = buildingFootprint(b.type, b.tx, b.ty, b.rot || 0);
+    let changed = false;
+    if (b.w !== fp.w || b.h !== fp.h) {
+      b.w = fp.w;
+      b.h = fp.h;
+      changed = true;
+    }
+    const rect = footprintRect(fp);
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2;
+    if (Math.abs(b.x - cx) > 0.01 || Math.abs(b.y - cy) > 0.01) {
+      b.x = cx;
+      b.y = cy;
+      changed = true;
+    }
+    return changed;
+  }
+
+  /**
+   * Знаходить «фантомні» клітини (зайняті, але без споруди або поза її footprint).
+   * Повертає кількість виправлень; при конфлікті перекриття — повний rebuild.
+   */
+  repairOccupancyIntegrity() {
+    let fixes = 0;
+    for (const [key, bid] of [...this.occupancy.entries()]) {
+      const b = this.buildings.get(bid);
+      if (!b) {
+        this.occupancy.delete(key);
+        fixes++;
+        continue;
+      }
+      const tx = Number(key.split(",")[0]);
+      const ty = Number(key.split(",")[1]);
+      if (tx < b.tx || ty < b.ty || tx >= b.tx + b.w || ty >= b.ty + b.h) {
+        this.occupancy.delete(key);
+        fixes++;
+      }
+    }
+    for (const b of this.buildings.values()) {
+      if (!BUILDINGS[b.type]) continue;
+      if (this.syncBuildingFootprint(b)) fixes++;
+      const fp = { tx: b.tx, ty: b.ty, w: b.w, h: b.h };
+      for (let x = fp.tx; x < fp.tx + fp.w; x++) {
+        for (let y = fp.ty; y < fp.ty + fp.h; y++) {
+          const k = `${x},${y}`;
+          const occ = this.occupancy.get(k);
+          if (occ === b.id) continue;
+          if (occ && this.buildings.has(occ)) {
+            this.rebuildOccupancy();
+            return fixes + 1;
+          }
+          this.occupancy.set(k, b.id);
+          fixes++;
+        }
+      }
+    }
+    if (fixes) this.invalidateKeepsCache();
+    return fixes;
+  }
+
+  purgeOccupancyAt(tx, ty) {
+    const key = `${tx},${ty}`;
+    const bid = this.occupancy.get(key);
+    if (!bid) return false;
+    const b = this.buildings.get(bid);
+    if (!b) {
+      this.occupancy.delete(key);
+      return true;
+    }
+    if (tx < b.tx || ty < b.ty || tx >= b.tx + b.w || ty >= b.ty + b.h) {
+      this.occupancy.delete(key);
+      return true;
+    }
+    return false;
   }
 
   markFootprint(fp, buildingId) {
@@ -1844,6 +2072,7 @@ export class World {
   }
 
   occupiedKey(tx, ty) {
+    if (this.purgeOccupancyAt(tx, ty)) return false;
     return this.occupancy.has(`${tx},${ty}`);
   }
 
@@ -1853,7 +2082,12 @@ export class World {
         const key = `${x},${y}`;
         const occ = this.occupancy.get(key);
         if (!occ || occ === ignoreId) continue;
-        if (!this.buildings.has(occ)) {
+        const ob = this.buildings.get(occ);
+        if (!ob) {
+          this.occupancy.delete(key);
+          continue;
+        }
+        if (x < ob.tx || y < ob.ty || x >= ob.tx + ob.w || y >= ob.ty + ob.h) {
           this.occupancy.delete(key);
           continue;
         }
@@ -1918,6 +2152,7 @@ export class World {
   buildingAtWorld(x, y) {
     const tx = Math.floor(x / TILE);
     const ty = Math.floor(y / TILE);
+    if (this.purgeOccupancyAt(tx, ty)) return null;
     const id = this.occupancy.get(`${tx},${ty}`);
     return id ? this.buildings.get(id) : null;
   }
@@ -1936,9 +2171,16 @@ export class World {
       }
     }
     if (isCore && !fromFortCascade) {
-      const fortId = team || b.ownerId;
-      this.destroySettlement(fortId, { spillOrigin: { x: b.x, y: b.y, ownerId: b.ownerId } });
-      this.events.push({ t: "fort_down", x: b.x, y: b.y, team: fortId });
+      const fortId = b.ownerId || b.team;
+      const spillOrigin = { x: b.x, y: b.y, ownerId: b.ownerId, team: b.team };
+      this.destroySettlement(fortId, { spillOrigin, fortHint: b });
+      this.events.push({
+        t: "fort_down",
+        x: b.x,
+        y: b.y,
+        team: fortId,
+        playerId: b.ownerId || fortId,
+      });
     }
   }
 
@@ -1984,9 +2226,9 @@ export class World {
 
   fortWipeCoinReward(core) {
     if (!core || core.type !== "core") return 0;
-    const fortId = core.team || core.ownerId;
+    const fortId = core.ownerId || core.team;
     let sum = 0;
-    for (const x of this.buildingsOf(fortId)) sum += this.buildingBounty(x);
+    for (const x of this.buildingsOf(fortId, core)) sum += this.buildingBounty(x);
     const extra = Math.max(
       FORT_WIPE.coinBonusFlat,
       Math.round(sum * Math.max(0, FORT_WIPE.coinBonusMult - 1))
@@ -2004,9 +2246,9 @@ export class World {
   /** Ресурси за знесений форт — сума sellValue усіх споруд (дерево, камінь, золото). */
   awardFortBuildingValue(killer, core) {
     if (!killer?.stock || !core || core.type !== "core") return;
-    const fortId = core.team || core.ownerId;
+    const fortId = core.ownerId || core.team;
     const totals = emptyStock();
-    for (const b of this.buildingsOf(fortId)) {
+    for (const b of this.buildingsOf(fortId, core)) {
       const def = BUILDINGS[b.type];
       if (!def) continue;
       const val = sellValue(def, b.level || 1);
@@ -2540,7 +2782,7 @@ export class World {
       y,
       resource,
       amount,
-      life: 40,
+      life: LOOT_DESPAWN_SEC,
     };
     this.loot.set(l.id, l);
   }
@@ -2579,13 +2821,20 @@ export class World {
 
   stepNodes() {
     for (const n of this.nodes.values()) {
-      if (!n.alive && this.tick >= n.respawnAt) {
-        if (!this.occupiedKey(n.tx, n.ty)) {
-          n.alive = true;
-          n.hp = n.maxHp;
-        } else {
-          n.respawnAt = this.tick + 40;
-        }
+      if (n.alive) {
+        this.suppressNodeIfUnderBuilding(n);
+        continue;
+      }
+      if (this.tick < n.respawnAt) continue;
+      const spot = this.canSpawnNodeAt(n.tx, n.ty, n.id)
+        ? { tx: n.tx, ty: n.ty }
+        : this.findEmptyNodeTile(n.tx, n.ty);
+      if (spot) {
+        this.placeNodeOnTile(n, spot.tx, spot.ty);
+        n.alive = true;
+        n.hp = n.maxHp;
+      } else {
+        n.respawnAt = this.tick + 40;
       }
     }
   }
@@ -2664,6 +2913,7 @@ export class World {
     const t1y = Math.floor((y + r) / TILE);
     for (let tx = t0x; tx <= t1x; tx++) {
       for (let ty = t0y; ty <= t1y; ty++) {
+        if (this.purgeOccupancyAt(tx, ty)) continue;
         const bid = this.occupancy.get(`${tx},${ty}`);
         if (!bid) continue;
         const b = this.buildings.get(bid);
@@ -3032,6 +3282,7 @@ export class World {
     for (const n of snap.nodes || []) {
       this.spawnNode(n.kind, n.tx, n.ty, n);
     }
+    this.sanitizeAliveNodesVsBuildings();
     for (const n of snap.npcs || []) {
       this.spawnNpc(n.team, n.x, n.y, { cx: n.homeX, cy: n.homeY }, n);
     }

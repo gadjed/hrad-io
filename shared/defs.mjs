@@ -4,6 +4,10 @@ export const WORLD_SIZE = TILE * WORLD_TILES;
 export const TICK_RATE = 20;
 export const DT = 1 / TICK_RATE;
 export const AOI_RADIUS = 1100;
+/** Як часто сервер звіряє карту зайнятості зі спорудами (с). */
+export const OCCUPANCY_AUDIT_SEC = 10;
+/** Час життя ресурсу на землі після випадіння (с). */
+export const LOOT_DESPAWN_SEC = 180;
 
 export const ADMIN_PASSWORD = "admin";
 
