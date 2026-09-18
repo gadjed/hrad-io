@@ -22,7 +22,11 @@
         <p class="tagline">Добувайте. Зводьте мури. Тримайте цитадель.</p>
         <label>
           Ім'я
-          <input id="name" maxlength="16" placeholder="Воєвода" autocomplete="off" />
+          <input id="name" maxlength="16" placeholder="Воєвода" autocomplete="username" />
+        </label>
+        <label>
+          Пароль персонажа
+          <input id="world-password" type="password" maxlength="64" placeholder="мін. 4 символи" autocomplete="current-password" />
         </label>
         <button id="play" class="primary" type="button">Увійти в світ</button>
         <div class="divider">адмін</div>
@@ -33,7 +37,7 @@
         <button id="sandbox" class="ghost" type="button">Пісочниця прототипів</button>
         <p id="lobby-error" class="error" hidden></p>
         <p class="hint">
-          WASD — рух · ЛКМ — збір / удар по ворожих спорудах · клік по своїй — картка · C — герой · B — будівництво
+          WASD — рух · ЛКМ — збір / удар · C — герой · B — будівництво · інше ім'я — інший персонаж (прогрес окремо)
         </p>
       </div>
     </div>
@@ -45,11 +49,21 @@
           <div class="brand">HRAD</div>
           <div id="mode-badge" class="badge">Світ</div>
         </div>
-        <div class="resources">
-          <span data-res="wood"><i></i><b id="res-wood">0</b></span>
-          <span data-res="stone"><i></i><b id="res-stone">0</b></span>
-          <span data-res="gold"><i></i><b id="res-gold">0</b></span>
-          <span data-res="coins"><i></i><b id="res-coins">0</b></span>
+        <div class="resources-panel" id="resources-panel">
+          <div class="resources-row" id="carry-row" title="У рюкзаку (збір руками)">
+            <span class="resources-label">Гравець</span>
+            <span class="resources-cell" data-res="wood"><i></i><b id="res-wood">0</b></span>
+            <span class="resources-cell" data-res="stone"><i></i><b id="res-stone">0</b></span>
+            <span class="resources-cell" data-res="gold"><i></i><b id="res-gold">0</b></span>
+            <span class="resources-cell" data-res="coins"><i></i><b id="res-coins">0</b></span>
+          </div>
+          <div class="resources-row treasury" id="treasury-row" hidden title="Скарбниця цитаделі (дерево, камінь, золото)">
+            <span class="resources-label">Скарб</span>
+            <span class="resources-cell" data-res="wood"><i></i><b id="tre-wood">0</b></span>
+            <span class="resources-cell" data-res="stone"><i></i><b id="tre-stone">0</b></span>
+            <span class="resources-cell" data-res="gold"><i></i><b id="tre-gold">0</b></span>
+            <span class="resources-spacer" aria-hidden="true"></span>
+          </div>
         </div>
         <div class="hp-wrap">
           <div id="hp-bar"></div>
@@ -62,7 +76,7 @@
         </div>
         <div id="build-hint"></div>
         <div id="toasts"></div>
-        <div id="death" hidden>Відродження <span id="death-t">3</span></div>
+        <div id="death" hidden><span id="death-msg">Відродження</span> <span id="death-t">3</span></div>
       </div>
       <div id="inspect" hidden>
         <div class="inspect-card" role="dialog" aria-modal="true" aria-labelledby="inspect-name">
@@ -105,6 +119,7 @@
           </dl>
           <div id="inspect-actions" class="inspect-actions">
             <button id="inspect-upgrade" type="button">Покращити</button>
+            <button id="inspect-repair" type="button">Ремонт</button>
             <button id="inspect-sell" class="danger" type="button">Продати</button>
           </div>
           <p id="inspect-note" class="inspect-note" hidden></p>
@@ -114,7 +129,7 @@
         <div class="hero-card" role="dialog" aria-modal="true" aria-labelledby="hero-title">
           <button id="hero-close" class="inspect-close" type="button" aria-label="Закрити">×</button>
           <h2 id="hero-title">Герой</h2>
-          <p class="build-copy">Прокачка за монети. Монети падають з НПС і зруйнованих ворожих споруд.</p>
+          <p class="build-copy">Прокачка за монети (8 базових рівнів, далі ★ — безкінечно, ціна різко зростає). Монети — з НПС, монстрів і ворожих споруд.</p>
           <p id="hero-coins" class="build-assign">Монети: 0</p>
           <div id="hero-list"></div>
         </div>
@@ -123,9 +138,27 @@
         <div class="build-card" role="dialog" aria-modal="true" aria-labelledby="build-title">
           <button id="build-close" class="inspect-close" type="button" aria-label="Закрити">×</button>
           <h2 id="build-title">Будівництво</h2>
-          <p class="build-copy">Оберіть споруду, потім натисніть слот 1–0 або клікніть хоткей внизу.</p>
+          <p class="build-copy">Клікніть споруду — вона потрапить у хоткей (зелені = вистачає ресурсів). ПКМ на карті — поставити.</p>
           <p id="build-assign" class="build-assign" hidden></p>
           <div id="build-catalog"></div>
+          <section class="build-tools">
+            <h3>Інструменти</h3>
+            <p class="build-copy">Масові дії застосовуються до всіх ваших споруд обраного типу (на сервері, не лише на екрані).</p>
+            <label class="tool-field">
+              Тип споруди
+              <select id="tool-type"></select>
+            </label>
+            <div class="row tool-row">
+              <button id="tool-bulk-upgrade" type="button">Покращити всі</button>
+              <button id="tool-bulk-sell" type="button" class="danger">Продати всі</button>
+            </div>
+            <div class="row tool-row">
+              <button id="tool-blueprint-copy" type="button">Копіювати фортецю</button>
+              <button id="tool-blueprint-paste" type="button">Вставити блупрінт</button>
+            </div>
+            <p id="tool-blueprint-status" class="build-assign"></p>
+            <button id="tool-clear-hotkeys" type="button" class="ghost tool-clear">Очистити хоткей 1–0</button>
+          </section>
         </div>
       </div>
       <aside id="sandbox-panel" hidden>

@@ -34,8 +34,16 @@ function ensureWorld() {
   const snap = worldStore.load();
   if (snap) {
     rooms.world.hydrate(snap);
+    rooms.world.rebuildOccupancy();
     rooms.world.catchUp((Date.now() - snap.savedAt) / 1000);
-    console.log(`Світ відновлено · ${rooms.world.buildings.size} споруд · AFK ${(Math.max(0, Date.now() - snap.savedAt) / 1000) | 0}с`);
+    const before = rooms.world.npcSettlementCount();
+    rooms.world.maintainNpcSettlements();
+    if (rooms.world.monsters.size === 0) rooms.world.spawnMonsters();
+    if (rooms.world.bots.size === 0) rooms.world.spawnWorldBots();
+    const npcKeeps = rooms.world.npcSettlementCount();
+    console.log(
+      `Світ відновлено · ${rooms.world.buildings.size} споруд · NPC ${npcKeeps}${npcKeeps > before ? ` (+${npcKeeps - before})` : ""} · AFK ${(Math.max(0, Date.now() - snap.savedAt) / 1000) | 0}с`
+    );
   } else {
     rooms.world.generate();
     persistWorld();
@@ -103,6 +111,35 @@ function handle(client, msg) {
     client.room.sellBuilding(client.player.id, msg.id);
     return;
   }
+  if (msg.type === "repair") {
+    client.room.repairBuilding(client.player.id, msg.id);
+    return;
+  }
+  if (msg.type === "bulk_upgrade") {
+    client.room.bulkUpgrade(client.player.id, msg.buildType);
+    return;
+  }
+  if (msg.type === "bulk_sell") {
+    client.room.bulkSell(client.player.id, msg.buildType || "*");
+    return;
+  }
+  if (msg.type === "blueprint_export") {
+    const proto = client.room.exportPlayerBlueprint(client.player.id, msg.name);
+    if (!proto) {
+      send(client.socket, { type: "toast", text: "Немає ваших споруд для копіювання" });
+      return;
+    }
+    send(client.socket, { type: "blueprint", proto });
+    return;
+  }
+  if (msg.type === "blueprint_paste") {
+    if (!msg.proto?.buildings?.length) {
+      send(client.socket, { type: "toast", text: "Блупрінт порожній" });
+      return;
+    }
+    client.room.pasteBlueprint(client.player.id, msg.proto);
+    return;
+  }
   if (msg.type === "hero_upgrade") {
     client.room.upgradeHero(client.player.id, msg.stat);
     return;
@@ -127,16 +164,26 @@ function join(client, msg) {
       }
     }
   }
-  const player = room.addPlayer(msg.name, {
-    skin: msg.color,
-    token: mode === "world" && TOKEN_RE.test(msg.token || "") ? msg.token : null,
-  });
-  for (const c of clients.values()) {
-    if (c !== client && c.player?.id === player.id) {
-      c.player = null;
-      c.room = null;
-      try { c.socket.close(); } catch { /* ignore */ }
+  let player;
+  if (mode === "world") {
+    const login = room.loginWorldPlayer(
+      msg.name,
+      msg.password,
+      TOKEN_RE.test(msg.token || "") ? msg.token : null
+    );
+    if (!login.ok) {
+      send(client.socket, { type: "error", text: login.text });
+      return;
     }
+    for (const c of clients.values()) {
+      if (c !== client && c.mode === "world" && c.player?.id === login.player.id) {
+        send(client.socket, { type: "error", text: "Цей гравець уже в світі" });
+        return;
+      }
+    }
+    player = login.player;
+  } else {
+    player = room.addPlayer(msg.name, { skin: msg.color, token: null });
   }
   client.player = player;
   client.room = room;
@@ -164,13 +211,16 @@ async function sandboxCommand(client, msg) {
       send(client.socket, { type: "toast", text: `Збережено: ${saved.name}` });
       const world = ensureWorld();
       const margin = 16;
+      let stamped = false;
       for (let i = 0; i < 12; i++) {
         const tx = margin + ((Math.random() * (WORLD_TILES - margin * 2)) | 0);
         const ty = margin + ((Math.random() * (WORLD_TILES - margin * 2)) | 0);
         if (!world.canStamp(saved, tx, ty)) continue;
         world.stampPrototype(saved, tx, ty, `npc_${world.factions.size}`);
+        stamped = true;
         break;
       }
+      if (!stamped) send(client.socket, { type: "toast", text: "Немає місця у світі для цитаделі НПС" });
       return;
     }
     if (msg.type === "sandbox_load") {

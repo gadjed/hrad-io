@@ -97,8 +97,10 @@ export class Renderer {
 
     this.drawGround(state);
     if (this.mode === "sandbox") this.drawGrid();
+    this.drawKeepZones(state, youId);
     for (const n of state.nodes) this.drawNode(n);
     for (const l of state.loot) this.drawLoot(l);
+    this.drawLastDeath(state);
     const buildings = [...state.buildings].sort((a, b) => a.y - b.y);
     for (const b of buildings) this.drawBuilding(b, youId);
     for (const b of buildings) this.drawBuildingHp(b, youId);
@@ -111,6 +113,38 @@ export class Renderer {
 
     ctx.restore();
     this.drawMinimap(state, youId);
+  }
+
+  drawKeepZones(state, youId) {
+    if (this.mode === "sandbox") return;
+    const you = state.you;
+    const ctx = this.ctx;
+    for (const k of state.keeps || []) {
+      if (k.team !== youId) continue;
+      const x = k.tx * TILE;
+      const y = k.ty * TILE;
+      const w = (k.tx1 - k.tx + 1) * TILE;
+      const h = (k.ty1 - k.ty + 1) * TILE;
+      ctx.save();
+      ctx.fillStyle = you?.inVault ? "rgba(215,176,86,0.07)" : "rgba(215,176,86,0.04)";
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = you?.inVault ? "#d7b056" : "rgba(215,176,86,0.35)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 8]);
+      ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+      ctx.restore();
+    }
+    const core = state.buildings?.find((b) => b.team === youId && b.type === "core");
+    if (core && you) {
+      ctx.save();
+      ctx.strokeStyle = you.inVault ? "#f0d48a" : "rgba(240,212,138,0.35)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.arc(core.x, core.y, 112, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   drawGround() {
@@ -316,10 +350,17 @@ export class Renderer {
     ctx.ellipse(2, 10, u.r, u.r * 0.45, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.rotate(u.aim);
-    ctx.fillStyle = u.color;
+    ctx.fillStyle = u.kind === "monster" ? "#5a7a52" : u.color;
     ctx.beginPath();
     ctx.arc(0, 0, u.r, 0, Math.PI * 2);
     ctx.fill();
+    if (u.kind === "monster") {
+      ctx.fillStyle = "#2a3828";
+      ctx.beginPath();
+      ctx.arc(-5, -4, 4, 0, Math.PI * 2);
+      ctx.arc(5, -4, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.strokeStyle = "#1a140c";
     ctx.lineWidth = 2;
     ctx.stroke();
@@ -379,6 +420,28 @@ export class Renderer {
     });
   }
 
+  drawLastDeath(state) {
+    const d = state.you?.lastDeath;
+    if (!d || !Number.isFinite(d.x) || !Number.isFinite(d.y)) return;
+    const ctx = this.ctx;
+    const sx = d.x;
+    const sy = d.y;
+    ctx.save();
+    ctx.fillStyle = "rgba(255, 107, 107, 0.75)";
+    ctx.beginPath();
+    ctx.arc(sx, sy, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#1a140c";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sx - 6, sy - 6);
+    ctx.lineTo(sx + 6, sy + 6);
+    ctx.moveTo(sx + 6, sy - 6);
+    ctx.lineTo(sx - 6, sy + 6);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   drawMinimap(state, youId) {
     const ctx = this.mctx;
     const s = this.minimap.width;
@@ -389,6 +452,19 @@ export class Renderer {
     for (const b of state.minimap || []) {
       ctx.fillStyle = b.npc ? "#c4453c" : "#d7b056";
       ctx.fillRect(b.x * scale - 2, b.y * scale - 2, 4, 4);
+    }
+    const death = state.you?.lastDeath;
+    if (death && Number.isFinite(death.x) && Number.isFinite(death.y)) {
+      const dx = death.x * scale;
+      const dy = death.y * scale;
+      ctx.strokeStyle = "#ff6b6b";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(dx - 4, dy - 4);
+      ctx.lineTo(dx + 4, dy + 4);
+      ctx.moveTo(dx + 4, dy - 4);
+      ctx.lineTo(dx - 4, dy + 4);
+      ctx.stroke();
     }
     const you = state.units.find((u) => u.id === youId);
     if (you) {

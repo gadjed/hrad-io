@@ -51,61 +51,55 @@ function keep(name, pieces, rings) {
   };
 }
 
+/** Внутрішні споруди не ставимо на вісі x=0 / y=0 — це коридори до брам. */
 export const DEFAULT_PROTOTYPES = [
   keep(
     "Сторожовий пост",
     [
       ["core", -1, -1],
-      ["tower_arrow", 1, -2],
-      ["goldmine", -2, 1],
-      ["spikes", 0, -2],
-      ["spikes", 0, 2],
+      ["tower_arrow", 2, -2],
+      ["goldmine", 2, 1],
     ],
-    [{ type: "wall_wood", x0: -3, y0: -3, x1: 3, y1: 3, gates: [[0, -3], [0, 3]] }]
+    [{ type: "wall_wood", x0: -4, y0: -4, x1: 4, y1: 4, gates: [[0, -4], [0, 4]] }]
   ),
   keep(
     "Квадратний форт",
     [
       ["core", -1, -1],
-      ["tower_arrow", -4, -4],
-      ["tower_arrow", 3, -4],
-      ["tower_cannon", 3, 3],
-      ["mill", -4, 0],
-      ["quarry", 2, 0],
-      ["goldmine", -1, 2],
-      ["spikes", 0, -4],
-      ["spikes", 0, 4],
-      ["spikes", -4, 0],
-      ["spikes", 4, 0],
+      ["tower_arrow", -3, -3],
+      ["tower_arrow", 2, -3],
+      ["tower_cannon", 2, 2],
+      ["tower_arrow", -3, 2],
+      ["mill", 3, 7],
+      ["quarry", -7, -2],
+      ["goldmine", 7, 1],
+      ["spikes", -4, -6],
+      ["spikes", 4, -6],
+      ["spikes", -4, 6],
+      ["spikes", 4, 6],
     ],
-    [
-      { type: "wall_stone", x0: -5, y0: -5, x1: 5, y1: 5, gates: [[0, -5], [0, 5], [-5, 0], [5, 0]] },
-      { type: "wall_wood", x0: -2, y0: -2, x1: 2, y1: 2, gates: [[0, -2], [0, 2]] },
-    ]
+    [{ type: "wall_stone", x0: -5, y0: -5, x1: 5, y1: 5, gates: [[0, -5], [0, 5], [-5, 0], [5, 0]] }]
   ),
   keep(
     "Цитадель",
     [
       ["core", -1, -1],
-      ["tower_cannon", -7, -6],
-      ["tower_cannon", 6, -6],
-      ["tower_cannon", -7, 5],
-      ["tower_arrow", 6, 5],
-      ["tower_arrow", -1, -6],
-      ["tower_arrow", -1, 5],
-      ["mill", -7, -2],
-      ["quarry", 5, -2],
-      ["goldmine", -7, 1],
-      ["goldmine", 5, 1],
-      ["spikes", 0, -6],
-      ["spikes", 0, 6],
-      ["spikes", -7, 0],
-      ["spikes", 7, 0],
+      ["tower_cannon", -4, -4],
+      ["tower_cannon", 3, -4],
+      ["tower_cannon", 3, 3],
+      ["tower_arrow", -4, 3],
+      ["tower_arrow", -5, -3],
+      ["tower_arrow", 2, 2],
+      ["mill", 3, 8],
+      ["quarry", -9, 1],
+      ["goldmine", 9, -2],
+      ["goldmine", 8, 5],
+      ["spikes", -5, -7],
+      ["spikes", 5, -7],
+      ["spikes", -5, 7],
+      ["spikes", 5, 7],
     ],
-    [
-      { type: "wall_stone", x0: -8, y0: -7, x1: 8, y1: 7, gates: [[0, -7], [0, 7], [-8, 0], [8, 0]] },
-      { type: "wall_stone", x0: -3, y0: -3, x1: 3, y1: 3, gates: [[0, -3], [0, 3]] },
-    ]
+    [{ type: "wall_stone", x0: -6, y0: -6, x1: 6, y1: 6, gates: [[0, -6], [0, 6], [-6, 0], [6, 0]] }]
   ),
 ];
 
@@ -134,10 +128,16 @@ export class PrototypeStore {
         // skip broken files
       }
     }
-    if (this.cache.size === 0) {
-      for (const proto of DEFAULT_PROTOTYPES) {
-        await this.save(proto, true);
-      }
+    for (const proto of DEFAULT_PROTOTYPES) {
+      const prev = this.cache.get(proto.id);
+      await this.save(
+        {
+          ...proto,
+          createdAt: prev?.createdAt ?? proto.createdAt,
+          updatedAt: new Date().toISOString(),
+        },
+        true
+      );
     }
   }
 

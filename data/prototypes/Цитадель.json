@@ -2,7 +2,7 @@
   "id": "Цитадель",
   "name": "Цитадель",
   "createdAt": "2026-09-18T09:13:20.423Z",
-  "updatedAt": "2026-09-18T09:13:20.426Z",
+  "updatedAt": "2026-09-18T13:42:17.618Z",
   "origin": {
     "tx": 0,
     "ty": 0
@@ -16,578 +16,362 @@
     },
     {
       "type": "tower_cannon",
-      "tx": -7,
-      "ty": -6,
+      "tx": -4,
+      "ty": -4,
       "rot": 0
     },
     {
       "type": "tower_cannon",
-      "tx": 6,
-      "ty": -6,
+      "tx": 3,
+      "ty": -4,
       "rot": 0
     },
     {
       "type": "tower_cannon",
-      "tx": -7,
-      "ty": 5,
+      "tx": 3,
+      "ty": 3,
       "rot": 0
     },
     {
       "type": "tower_arrow",
-      "tx": 6,
-      "ty": 5,
-      "rot": 0
-    },
-    {
-      "type": "tower_arrow",
-      "tx": -1,
-      "ty": -6,
-      "rot": 0
-    },
-    {
-      "type": "tower_arrow",
-      "tx": -1,
-      "ty": 5,
+      "tx": -4,
+      "ty": 3,
       "rot": 0
     },
     {
       "type": "mill",
-      "tx": -7,
-      "ty": -2,
+      "tx": 3,
+      "ty": 8,
       "rot": 0
     },
     {
       "type": "quarry",
-      "tx": 5,
-      "ty": -2,
-      "rot": 0
-    },
-    {
-      "type": "goldmine",
-      "tx": -7,
+      "tx": -9,
       "ty": 1,
       "rot": 0
     },
     {
       "type": "goldmine",
-      "tx": 5,
-      "ty": 1,
-      "rot": 0
-    },
-    {
-      "type": "spikes",
-      "tx": -7,
-      "ty": 0,
-      "rot": 0
-    },
-    {
-      "type": "spikes",
-      "tx": 7,
-      "ty": 0,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -8,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -8,
-      "ty": -6,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -8,
-      "ty": -5,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -8,
-      "ty": -4,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -8,
-      "ty": -3,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -8,
+      "tx": 9,
       "ty": -2,
       "rot": 0
     },
     {
-      "type": "wall_stone",
-      "tx": -8,
-      "ty": -1,
-      "rot": 0
-    },
-    {
-      "type": "gate",
-      "tx": -8,
-      "ty": 0,
-      "rot": 1
-    },
-    {
-      "type": "wall_stone",
-      "tx": -8,
-      "ty": 1,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -8,
-      "ty": 2,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -8,
-      "ty": 3,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -8,
-      "ty": 4,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -8,
+      "type": "goldmine",
+      "tx": 8,
       "ty": 5,
       "rot": 0
     },
     {
-      "type": "wall_stone",
-      "tx": -8,
-      "ty": 6,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -8,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -7,
+      "type": "spikes",
+      "tx": -5,
       "ty": -7,
       "rot": 0
     },
     {
-      "type": "wall_stone",
-      "tx": -7,
+      "type": "spikes",
+      "tx": 5,
+      "ty": -7,
+      "rot": 0
+    },
+    {
+      "type": "spikes",
+      "tx": -5,
+      "ty": 7,
+      "rot": 0
+    },
+    {
+      "type": "spikes",
+      "tx": 5,
       "ty": 7,
       "rot": 0
     },
     {
       "type": "wall_stone",
       "tx": -6,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -6,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -5,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -5,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -4,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -4,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -3,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -3,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -2,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -2,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -1,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -1,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "gate",
-      "tx": 0,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "gate",
-      "tx": 0,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 1,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 1,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 2,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 2,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 3,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 3,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 4,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 4,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 5,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 5,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 6,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 6,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 7,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 7,
-      "ty": 7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 8,
-      "ty": -7,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": 8,
       "ty": -6,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 8,
+      "tx": -6,
       "ty": -5,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 8,
+      "tx": -6,
       "ty": -4,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 8,
+      "tx": -6,
       "ty": -3,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 8,
+      "tx": -6,
       "ty": -2,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 8,
+      "tx": -6,
       "ty": -1,
       "rot": 0
     },
     {
       "type": "gate",
-      "tx": 8,
+      "tx": -6,
       "ty": 0,
       "rot": 1
     },
     {
       "type": "wall_stone",
-      "tx": 8,
+      "tx": -6,
       "ty": 1,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 8,
+      "tx": -6,
       "ty": 2,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 8,
+      "tx": -6,
       "ty": 3,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 8,
+      "tx": -6,
       "ty": 4,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 8,
+      "tx": -6,
       "ty": 5,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 8,
+      "tx": -6,
       "ty": 6,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 8,
-      "ty": 7,
+      "tx": -5,
+      "ty": -6,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -5,
+      "ty": 6,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -4,
+      "ty": -6,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -4,
+      "ty": 6,
       "rot": 0
     },
     {
       "type": "wall_stone",
       "tx": -3,
-      "ty": -3,
+      "ty": -6,
       "rot": 0
     },
     {
       "type": "wall_stone",
       "tx": -3,
-      "ty": -2,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -3,
-      "ty": -1,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -3,
-      "ty": 0,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -3,
-      "ty": 1,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -3,
-      "ty": 2,
-      "rot": 0
-    },
-    {
-      "type": "wall_stone",
-      "tx": -3,
-      "ty": 3,
+      "ty": 6,
       "rot": 0
     },
     {
       "type": "wall_stone",
       "tx": -2,
-      "ty": -3,
+      "ty": -6,
       "rot": 0
     },
     {
       "type": "wall_stone",
       "tx": -2,
-      "ty": 3,
+      "ty": 6,
       "rot": 0
     },
     {
       "type": "wall_stone",
       "tx": -1,
-      "ty": -3,
+      "ty": -6,
       "rot": 0
     },
     {
       "type": "wall_stone",
       "tx": -1,
-      "ty": 3,
+      "ty": 6,
       "rot": 0
     },
     {
       "type": "gate",
       "tx": 0,
-      "ty": -3,
+      "ty": -6,
       "rot": 0
     },
     {
       "type": "gate",
       "tx": 0,
-      "ty": 3,
+      "ty": 6,
       "rot": 0
     },
     {
       "type": "wall_stone",
       "tx": 1,
-      "ty": -3,
+      "ty": -6,
       "rot": 0
     },
     {
       "type": "wall_stone",
       "tx": 1,
-      "ty": 3,
+      "ty": 6,
       "rot": 0
     },
     {
       "type": "wall_stone",
       "tx": 2,
-      "ty": -3,
+      "ty": -6,
       "rot": 0
     },
     {
       "type": "wall_stone",
       "tx": 2,
-      "ty": 3,
+      "ty": 6,
       "rot": 0
     },
     {
       "type": "wall_stone",
       "tx": 3,
+      "ty": -6,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 3,
+      "ty": 6,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 4,
+      "ty": -6,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 4,
+      "ty": 6,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 5,
+      "ty": -6,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 5,
+      "ty": 6,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 6,
+      "ty": -6,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 6,
+      "ty": -5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 6,
+      "ty": -4,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 6,
       "ty": -3,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 3,
+      "tx": 6,
       "ty": -2,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 3,
+      "tx": 6,
       "ty": -1,
       "rot": 0
     },
     {
-      "type": "wall_stone",
-      "tx": 3,
+      "type": "gate",
+      "tx": 6,
       "ty": 0,
-      "rot": 0
+      "rot": 1
     },
     {
       "type": "wall_stone",
-      "tx": 3,
+      "tx": 6,
       "ty": 1,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 3,
+      "tx": 6,
       "ty": 2,
       "rot": 0
     },
     {
       "type": "wall_stone",
-      "tx": 3,
+      "tx": 6,
       "ty": 3,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 6,
+      "ty": 4,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 6,
+      "ty": 5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 6,
+      "ty": 6,
       "rot": 0
     }
   ]

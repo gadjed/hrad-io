@@ -224,48 +224,85 @@ button {
   line-height: 1.35;
 }
 
-.resources {
+.resources-panel {
   position: absolute;
   top: 18px;
-  left: 120px;
-  transform: none;
-  display: flex;
-  gap: 10px;
+  right: 18px;
+  display: grid;
+  grid-template-columns: 84px repeat(4, 76px);
+  gap: 8px;
   pointer-events: none;
 }
 
-.resources span {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 88px;
-  padding: 8px 12px;
-  background: var(--panel);
-  border: 1px solid var(--line);
+.resources-row {
+  display: contents;
 }
 
-.resources i {
-  width: 12px;
-  height: 12px;
+.resources-label,
+.resources-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 7px 11px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  line-height: 1;
+  box-sizing: border-box;
+  min-height: 32px;
+}
+
+.resources-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.resources-cell b {
+  min-width: 2.5ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.resources-cell i {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
   display: block;
 }
 
-.resources [data-res="wood"] i {
+.resources-cell[data-res="wood"] i {
   background: var(--wood);
 }
 
-.resources [data-res="stone"] i {
+.resources-cell[data-res="stone"] i {
   background: var(--stone);
 }
 
-.resources [data-res="gold"] i {
+.resources-cell[data-res="gold"] i {
   background: var(--gold);
 }
 
-.resources [data-res="coins"] i {
+.resources-cell[data-res="coins"] i {
   background: #f3c96b;
   border-radius: 50%;
   box-shadow: inset 0 0 0 2px #8a6a22;
+}
+
+.resources-spacer {
+  min-height: 32px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.resources-row.treasury .resources-cell {
+  opacity: 0.95;
+}
+
+.resources-row.treasury.in-vault .resources-cell {
+  border-color: rgba(215, 176, 86, 0.55);
 }
 
 .hp-wrap {
@@ -395,6 +432,7 @@ button {
 .inspect-card {
   width: min(380px, calc(100vw - 32px));
   padding: 22px 22px 18px;
+  pointer-events: auto;
   background:
     linear-gradient(180deg, rgba(36, 32, 22, 0.96), rgba(16, 18, 14, 0.96));
   border: 1px solid var(--line);
@@ -501,7 +539,8 @@ button {
   cursor: default;
 }
 
-#inspect-upgrade {
+#inspect-upgrade,
+#inspect-repair {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -549,6 +588,7 @@ button {
 .inspect-actions .danger {
   background: #6e2a32;
   color: #f3d6d2;
+  grid-column: 1 / -1;
 }
 
 .inspect-note {
@@ -602,6 +642,51 @@ button {
   font-weight: 700;
 }
 
+.build-tools {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.build-tools h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.tool-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.tool-field select {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font: inherit;
+}
+
+.tool-row {
+  margin-bottom: 8px;
+}
+
+.tool-row button {
+  flex: 1;
+}
+
+.tool-clear {
+  width: 100%;
+  margin-top: 8px;
+}
+
 .build-cat {
   margin-top: 16px;
 }
@@ -630,6 +715,17 @@ button {
   background: #0d120f;
   border: 1px solid rgba(232, 223, 200, 0.14);
   color: var(--ink);
+}
+
+.build-item.locked {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.build-item.can-build {
+  border-color: #3d9a55;
+  background: rgba(45, 120, 70, 0.14);
+  box-shadow: 0 0 0 1px rgba(61, 154, 85, 0.4);
 }
 
 .build-item.active {

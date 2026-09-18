@@ -6,7 +6,9 @@
   "description": "Top-down IO: harvest, fortify, hold. Sandbox for castle prototypes.",
   "scripts": {
     "start": "node server/index.mjs",
-    "dev": "node --watch server/index.mjs"
+    "dev": "node --watch server/index.mjs",
+    "world:gen": "node scripts/generate-settlements.mjs",
+    "world:regen": "node scripts/regen-world.mjs"
   },
   "engines": {
     "node": ">=18"

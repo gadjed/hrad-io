@@ -20,6 +20,34 @@ export const PLAYER = {
   respawnDelay: 3,
 };
 
+/** Зона цитаделі, скарбниця, відродження */
+export const CORE = {
+  depositRadius: 112,
+  zoneBase: 8,
+  zonePerLevel: 3,
+  respawnGold: 5,
+};
+
+/** Відновлення HP споруд у зоні форту */
+export const BUILD_REGEN = {
+  /** Безкоштовно в зоні цитаделі (HP/с) */
+  passiveHpPerSec: 0.55,
+  /** Платний ремонт зі скарбниці / складу фракції */
+  paidIntervalSec: 2.2,
+  paidHpPerTick: 10,
+  sandboxHpPerSec: 2.5,
+};
+
+export function coreZonePad(level) {
+  return CORE.zoneBase + (Math.max(1, level) - 1) * CORE.zonePerLevel;
+}
+
+/** Нагорода за знесення цитаделі (усі споруди фортом, не по одній). */
+export const FORT_WIPE = {
+  coinBonusMult: 1.5,
+  coinBonusFlat: 15,
+};
+
 export const NPC = {
   radius: 15,
   speed: 150,
@@ -30,6 +58,57 @@ export const NPC = {
   leash: 520,
 };
 
+/** Цільова кількість NPC-поселень у світі та їх відновлення */
+export const MONSTER = {
+  count: 24,
+  hp: 175,
+  speed: 136,
+  damage: 24,
+  radius: 20,
+  aggro: 380,
+  attackRange: 48,
+  attackCooldown: 0.72,
+  wanderRadius: 420,
+  respawnSec: 45,
+  /** Золото на землі + одразу в рюкзак вбивці */
+  goldLootMin: 8,
+  goldLootMax: 15,
+  goldOnKill: 6,
+  coinBonus: 4,
+};
+
+export const WORLD_BOTS = {
+  count: 4,
+  brainPeriod: 0.35,
+};
+
+export const WORLD_NPC = {
+  settlementCount: 10,
+  repopulateSec: 36,
+  /** Мін. відстань між ядрами; повна зона = coreZonePad + NPC keepTiles + keepGapTiles */
+  minCoreSpacingTiles: 22,
+  keepGapTiles: 4,
+};
+
+export const NPC_FACTION = {
+  startStock: { wood: 48, stone: 28, gold: 12 },
+  maxGuards: 8,
+  maxGatherers: 4,
+  maxBuilders: 1,
+  recruitGold: 6,
+  recruitCooldown: 8,
+  brainPeriod: 1,
+  keepTiles: 14,
+  expandMax: 24,
+  gatherAggro: 160,
+  harvestScan: 18 * TILE,
+  repairHp: 0.55,
+  placeReach: 56,
+  attackBuilding: 200,
+  huntLeash: 720,
+  jobTimeout: 10,
+};
+
 export const RESOURCES = {
   wood: { label: "Дерево", color: "#c9843c" },
   stone: { label: "Камінь", color: "#9aa4b2" },
@@ -37,7 +116,10 @@ export const RESOURCES = {
 };
 
 export const HERO = {
-  maxLevel: 8,
+  /** Перші 8 рівнів — базова ціна; далі безкінечно, ціна різко зростає */
+  baseMaxLevel: 8,
+  statCap: 999,
+  lateCostMult: 1.92,
   stats: {
     speed: { id: "speed", name: "Швидкість", desc: "Біжите швидше.", per: 0.08, cost: 8 },
     might: { id: "might", name: "Сила", desc: "Сильніший удар і збір.", per: 0.14, cost: 10 },
@@ -59,7 +141,7 @@ export function parseHero(raw) {
   }
   for (const key of Object.keys(base)) {
     const n = Number(src?.[key] || 0);
-    base[key] = clamp(Number.isFinite(n) ? n : 0, 0, HERO.maxLevel);
+    base[key] = clamp(Number.isFinite(n) ? n : 0, 0, HERO.statCap);
   }
   return base;
 }
@@ -67,7 +149,22 @@ export function parseHero(raw) {
 export function heroUpgradeCost(stat, level) {
   const def = HERO.stats[stat];
   if (!def) return 0;
-  return Math.max(1, Math.ceil(def.cost * (1 + Math.max(0, level) * 0.7)));
+  const lv = Math.max(0, level | 0);
+  if (lv < HERO.baseMaxLevel) {
+    return Math.max(1, Math.ceil(def.cost * (1 + lv * 0.7)));
+  }
+  const baseTier = Math.ceil(def.cost * (1 + (HERO.baseMaxLevel - 1) * 0.7));
+  const over = lv - HERO.baseMaxLevel + 1;
+  return Math.max(
+    baseTier + 1,
+    Math.ceil(baseTier * HERO.lateCostMult ** over * (1 + over * 0.22))
+  );
+}
+
+export function heroLevelLabel(level) {
+  const lv = Math.max(0, level | 0);
+  if (lv <= HERO.baseMaxLevel) return `${lv} / ${HERO.baseMaxLevel}`;
+  return `${lv} ★`;
 }
 
 export function playerSpeed(hero) {
@@ -118,14 +215,15 @@ export const BUILDINGS = {
   core: {
     id: "core",
     name: "Цитадель",
-    desc: "Серце бази. Точка відродження.",
+    desc: "Перша споруда. Скарбниця, зона будівництва, відродження за золото.",
     w: 2,
     h: 2,
     hp: 800,
-    cost: { wood: 80, stone: 80, gold: 20 },
+    cost: { wood: 18, stone: 6, gold: 2 },
     category: "keep",
     sandboxOnly: false,
     limit: 1,
+    requiresCore: false,
   },
   wall_wood: {
     id: "wall_wood",
@@ -227,10 +325,10 @@ export const BUILDINGS = {
 };
 
 export const BUILD_CATEGORIES = [
+  { id: "keep", name: "Цитадель" },
   { id: "wall", name: "Мури" },
   { id: "harvest", name: "Видобуток" },
   { id: "defense", name: "Оборона" },
-  { id: "keep", name: "Цитадель" },
 ];
 
 export const HOTBAR_SIZE = 10;
@@ -286,6 +384,27 @@ export function dist2(ax, ay, bx, by) {
 
 export function clamp(v, a, b) {
   return Math.max(a, Math.min(b, v));
+}
+
+export const RESOURCE_MAX = 9999;
+
+export function capResourceAmount(n) {
+  return clamp(Math.floor(Number(n) || 0), 0, RESOURCE_MAX);
+}
+
+export function addResource(stock, key, delta) {
+  if (!stock || !key || !delta) return;
+  stock[key] = capResourceAmount((stock[key] || 0) + delta);
+}
+
+export function capStock(stock) {
+  if (!stock) return stock;
+  for (const k of ["wood", "stone", "gold"]) stock[k] = capResourceAmount(stock[k]);
+  return stock;
+}
+
+export function capCoins(n) {
+  return capResourceAmount(n);
 }
 
 export function id() {
@@ -359,6 +478,22 @@ export function sellValue(def, level) {
   return out;
 }
 
+export function emptyStock(base = null) {
+  return {
+    wood: base?.wood | 0,
+    stone: base?.stone | 0,
+    gold: base?.gold | 0,
+  };
+}
+
+export function repairCost(def, level) {
+  const out = {};
+  for (const [k, v] of Object.entries(investedCost(def, level))) {
+    out[k] = Math.max(1, Math.floor(v * 0.25));
+  }
+  return out;
+}
+
 export function formatCost(cost) {
   return Object.entries(cost || {})
     .map(([k, v]) => `${v} ${RESOURCES[k]?.label || k}`)
@@ -374,6 +509,11 @@ export function buildingStatus(hp, maxHp) {
 
 export function buildingEffect(def, level) {
   const s = levelScale(level);
+  if (def.id === "core") {
+    const pad = coreZonePad(level);
+    const span = def.w + pad * 2;
+    return `Зона ${span}×${span} кл. · відродження ${CORE.respawnGold} золота · авторемонт споруд`;
+  }
   if (def.harvest) {
     const tiles = (harvestRadius(def, level) / TILE).toFixed(1);
     const every = harvestPeriod(def, level).toFixed(1);

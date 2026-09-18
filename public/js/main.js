@@ -10,19 +10,23 @@ import {
   buildingFootprint,
   upgradeCost,
   sellValue,
+  repairCost,
   formatCost,
+  canAfford,
   buildingStatus,
   buildingEffect,
   harvestRadius,
   harvestPeriod,
   buildingMaxHp,
   heroUpgradeCost,
+  heroLevelLabel,
 } from "/shared/defs.mjs";
 import { Renderer, paintIcon } from "./render.js";
 
 const lobby = document.getElementById("lobby");
 const gameEl = document.getElementById("game");
 const nameInput = document.getElementById("name");
+const worldPassInput = document.getElementById("world-password");
 const passInput = document.getElementById("password");
 const errEl = document.getElementById("lobby-error");
 const canvas = document.getElementById("view");
@@ -42,15 +46,53 @@ const assignHint = document.getElementById("build-assign");
 const sandboxToggle = document.getElementById("sandbox-toggle");
 const heroEl = document.getElementById("hero");
 const heroList = document.getElementById("hero-list");
+const toolTypeEl = document.getElementById("tool-type");
+const toolBlueprintStatus = document.getElementById("tool-blueprint-status");
+const BLUEPRINT_KEY = "hrad-blueprint";
 
 nameInput.value = localStorage.getItem("hrad-name") || "";
 
-function accountToken() {
-  let t = localStorage.getItem("hrad-account");
-  if (!/^p_[a-z0-9]{8,32}$/i.test(t || "")) {
-    t = "p_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-6);
-    localStorage.setItem("hrad-account", t);
+const CHARACTERS_KEY = "hrad-characters";
+
+function normalizePlayerName(name) {
+  return (name || "Воєвода").trim().slice(0, 16) || "Воєвода";
+}
+
+function newAccountToken() {
+  return `p_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-6)}`;
+}
+
+function loadCharacterTokens() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CHARACTERS_KEY) || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch {
+    return {};
   }
+}
+
+/** Окремий акаунт світу на кожне ім'я (на цьому браузері). */
+function accountTokenForName(name) {
+  const norm = normalizePlayerName(name);
+  const map = loadCharacterTokens();
+  if (/^p_[a-z0-9]{8,32}$/i.test(map[norm] || "")) return map[norm];
+
+  const legacy = localStorage.getItem("hrad-account");
+  const legacyName = normalizePlayerName(localStorage.getItem("hrad-name") || "");
+  if (
+    Object.keys(map).length === 0
+    && /^p_[a-z0-9]{8,32}$/i.test(legacy || "")
+    && legacyName === norm
+  ) {
+    map[norm] = legacy;
+    localStorage.setItem(CHARACTERS_KEY, JSON.stringify(map));
+    return legacy;
+  }
+
+  const t = newAccountToken();
+  map[norm] = t;
+  localStorage.setItem(CHARACTERS_KEY, JSON.stringify(map));
+  localStorage.setItem("hrad-account", t);
   return t;
 }
 
@@ -63,6 +105,7 @@ let rot = 0;
 let mode = "world";
 let playerId = null;
 let state = null;
+let catalogRefreshKey = "";
 let socket = null;
 let sendAcc = 0;
 let inspectId = null;
@@ -72,6 +115,14 @@ const renderer = new Renderer(canvas, minimap);
 
 function connect(joinMode) {
   errEl.hidden = true;
+  if (joinMode === "world") {
+    const pw = worldPassInput?.value || "";
+    if (pw.length < 4) {
+      errEl.hidden = false;
+      errEl.textContent = "Пароль персонажа — мінімум 4 символи";
+      return;
+    }
+  }
   const proto = location.protocol === "https:" ? "wss" : "ws";
   socket = new WebSocket(`${proto}://${location.host}`);
   socket.addEventListener("open", () => {
@@ -80,7 +131,8 @@ function connect(joinMode) {
       name: nameInput.value.trim() || "Воєвода",
       mode: joinMode,
       password: passInput.value,
-      token: accountToken(),
+      password: worldPassInput?.value || "",
+      token: accountTokenForName(nameInput.value.trim() || "Воєвода"),
     }));
   });
   socket.addEventListener("message", (ev) => {
@@ -94,7 +146,12 @@ function connect(joinMode) {
       playerId = msg.id;
       mode = msg.mode;
       renderer.mode = mode;
-      localStorage.setItem("hrad-name", nameInput.value.trim());
+      const norm = normalizePlayerName(nameInput.value.trim());
+      localStorage.setItem("hrad-name", norm);
+      const map = loadCharacterTokens();
+      map[norm] = msg.id;
+      localStorage.setItem(CHARACTERS_KEY, JSON.stringify(map));
+      localStorage.setItem("hrad-account", msg.id);
       enterGame(msg.prototypes || []);
       return;
     }
@@ -104,11 +161,17 @@ function connect(joinMode) {
       renderer.ingest(state.events);
       for (const e of state.events || []) {
         if (e.t === "toast") toast(e.text);
+        if (e.t === "deposit") toast("Ресурси в скарбниці");
+        if (e.t === "fort_loot") toast("Трофеї зруйнованого форту");
       }
       syncHud();
       return;
     }
     if (msg.type === "prototypes") renderProtos(msg.prototypes);
+    if (msg.type === "blueprint") {
+      saveBlueprintLocal(msg.proto);
+      toast(`Скопійовано: ${msg.proto.name} (${msg.proto.buildings.length} споруд)`);
+    }
     if (msg.type === "toast") toast(msg.text);
   });
   socket.addEventListener("close", () => {
@@ -202,6 +265,73 @@ function clearSlot(i) {
   buildHotbar();
 }
 
+function clearAllHotkeys() {
+  select(null);
+  slots = Array(HOTBAR_SIZE).fill(null);
+  saveSlots();
+  buildHotbar();
+  toast("Хоткей 1–0 очищено");
+}
+
+function saveBlueprintLocal(proto) {
+  localStorage.setItem(BLUEPRINT_KEY, JSON.stringify(proto));
+  updateBlueprintStatus();
+}
+
+function loadBlueprintLocal() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(BLUEPRINT_KEY) || "null");
+    if (!raw?.buildings?.length) return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+function updateBlueprintStatus() {
+  if (!toolBlueprintStatus) return;
+  const b = loadBlueprintLocal();
+  toolBlueprintStatus.textContent = b
+    ? `Блупрінт: «${b.name}» · ${b.buildings.length} споруд`
+    : "Блупрінт не збережено (копіюйте фортецю)";
+}
+
+function renderToolTypes() {
+  if (!toolTypeEl) return;
+  const prev = toolTypeEl.value;
+  const seen = new Set();
+  for (const b of state?.buildings || []) {
+    if (b.ownerId === playerId || b.team === playerId) seen.add(b.type);
+  }
+  toolTypeEl.innerHTML = "";
+  const sellAll = document.createElement("option");
+  sellAll.value = "*";
+  sellAll.textContent = "Усі споруди (крім цитаделі) — лише продаж";
+  toolTypeEl.append(sellAll);
+  for (const cat of BUILD_CATEGORIES) {
+    const og = document.createElement("optgroup");
+    og.label = cat.name;
+    for (const def of Object.values(BUILDINGS)) {
+      if (def.category !== cat.id) continue;
+      const opt = document.createElement("option");
+      opt.value = def.id;
+      opt.textContent = seen.has(def.id) ? `${def.name} (на карті)` : def.name;
+      if (def.id === "core") opt.textContent += " — не продається";
+      og.append(opt);
+    }
+    toolTypeEl.append(og);
+  }
+  if (prev && [...toolTypeEl.options].some((o) => o.value === prev)) toolTypeEl.value = prev;
+  else {
+    const wall = [...seen].find((t) => t.startsWith("wall_"));
+    toolTypeEl.value = wall || (seen.size ? [...seen][0] : "wall_wood");
+  }
+}
+
+function selectedToolType() {
+  return toolTypeEl?.value || "wall_wood";
+}
+
 function assignToSlot(i, id) {
   slots[i] = id;
   pendingAssign = null;
@@ -220,13 +350,24 @@ function select(id) {
   updateHint();
 }
 
+function buildWallet(y) {
+  if (!y) return { wood: 0, stone: 0, gold: 0 };
+  if (mode === "sandbox") return y.stock;
+  if (y.hasCore) return y.treasury || { wood: 0, stone: 0, gold: 0 };
+  return y.stock;
+}
+
 function updateHint() {
   if (!selected) {
-    hintEl.textContent = "Рука порожня. B — відкрити будівництво, 1–0 — взяти з хоткея, ЛКМ — збір.";
+    const extra = state?.you?.hasCore
+      ? " Зайдіть у коло цитаделі — ресурси з рюкзака в скарбницю."
+      : " Спочатку поставте цитадель (B).";
+    hintEl.textContent = `Рука порожня. B — будівництво, 1–0 — хоткей, ЛКМ — збір.${extra}`;
     return;
   }
   const def = BUILDINGS[selected];
-  hintEl.textContent = `${def.name} в руці (${formatCost(def.cost)}). ПКМ — поставити · Esc — сховати · R — поворот.`;
+  const payFrom = mode !== "sandbox" && state?.you?.hasCore && selected !== "core" ? "скарбниця" : "рюкзак";
+  hintEl.textContent = `${def.name} (${formatCost(def.cost)}, ${payFrom}). ПКМ — поставити · Esc · R — поворот.`;
 }
 
 function setSandboxCollapsed(collapsed) {
@@ -234,6 +375,45 @@ function setSandboxCollapsed(collapsed) {
   sandboxToggle.textContent = collapsed ? "Розгорнути" : "Згорнути";
   sandboxToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
   localStorage.setItem("hrad-sandbox-collapsed", collapsed ? "1" : "0");
+}
+
+function catalogRefreshToken(y) {
+  if (!y) return "";
+  const t = y.treasury || {};
+  return [
+    mode,
+    y.hasCore ? 1 : 0,
+    y.stock.wood | 0,
+    y.stock.stone | 0,
+    y.stock.gold | 0,
+    t.wood | 0,
+    t.stone | 0,
+    t.gold | 0,
+    pendingAssign || "",
+  ].join("|");
+}
+
+function pickCatalogBuilding(defId) {
+  if (!BUILDINGS[defId] || !state?.you) return;
+  const def = BUILDINGS[defId];
+  const hasCore = !!state.you.hasCore;
+  const locked = mode === "world" && !hasCore && defId !== "core";
+  if (locked) return;
+  if (!canBuildInCatalog(def)) return;
+  const empty = slots.findIndex((s) => !s);
+  assignToSlot(empty >= 0 ? empty : 0, defId);
+}
+
+function canBuildInCatalog(def) {
+  if (!def || !state?.you) return false;
+  const hasCore = !!state.you.hasCore;
+  const locked = mode === "world" && !hasCore && def.id !== "core";
+  if (locked) return false;
+  if (mode === "world" && def.id === "core" && hasCore) return false;
+  if (mode === "world" && def.id !== "core" && !hasCore) return false;
+  const free = mode === "sandbox";
+  const wallet = buildWallet(state.you);
+  return canAfford(wallet, def.cost, free);
 }
 
 function renderCatalog() {
@@ -246,19 +426,26 @@ function renderCatalog() {
     grid.className = "build-grid";
     for (const def of Object.values(BUILDINGS)) {
       if (def.category !== cat.id) continue;
+      const hasCore = !!state?.you?.hasCore;
+      const locked = mode === "world" && !hasCore && def.id !== "core";
+      const canBuild = canBuildInCatalog(def);
       const btn = document.createElement("button");
-      btn.className = "build-item" + (pendingAssign === def.id ? " active" : "");
+      btn.className =
+        "build-item"
+        + (pendingAssign === def.id ? " active" : "")
+        + (locked ? " locked" : "")
+        + (canBuild ? " can-build" : "");
       btn.type = "button";
+      btn.disabled = locked;
       const c = document.createElement("canvas");
       paintIcon(c, def.id);
       btn.append(c);
       const meta = document.createElement("span");
       meta.innerHTML = `<strong>${def.name}</strong><em>${formatCost(def.cost)}</em><em>${buildingEffect(def, 1)}</em>`;
       btn.append(meta);
-      btn.addEventListener("click", () => {
-        pendingAssign = pendingAssign === def.id ? null : def.id;
-        setAssignHint(pendingAssign);
-        renderCatalog();
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pickCatalogBuilding(def.id);
       });
       grid.append(btn);
     }
@@ -281,7 +468,12 @@ function openBuild() {
   closeInspect();
   closeHero();
   buildEl.hidden = false;
+  catalogRefreshKey = "";
+  pendingAssign = null;
+  setAssignHint(null);
   renderCatalog();
+  renderToolTypes();
+  updateBlueprintStatus();
 }
 
 function openHero() {
@@ -307,19 +499,19 @@ function renderHero() {
   const free = mode === "sandbox";
   for (const def of Object.values(HERO.stats)) {
     const level = hero[def.id] || 0;
-    const maxed = level >= HERO.maxLevel;
     const cost = heroUpgradeCost(def.id, level);
     const row = document.createElement("div");
     row.className = "hero-row";
     const meta = document.createElement("div");
-    meta.innerHTML = `<strong>${def.name}</strong><em>${def.desc}</em>`;
+    const late = level >= HERO.baseMaxLevel;
+    meta.innerHTML = `<strong>${def.name}</strong><em>${def.desc}${late ? " · asc" : ""}</em>`;
     const lvl = document.createElement("span");
     lvl.className = "hero-lvl";
-    lvl.textContent = `${level} / ${HERO.maxLevel}`;
+    lvl.textContent = heroLevelLabel(level);
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.disabled = maxed || (!free && coins < cost);
-    btn.textContent = maxed ? "Максимум" : free ? "Покращити" : `${cost} монет`;
+    btn.disabled = !free && coins < cost;
+    btn.textContent = free ? "Покращити" : `${cost} монет`;
     btn.onclick = () => send({ type: "hero_upgrade", stat: def.id });
     row.append(meta, lvl, btn);
     heroList.append(row);
@@ -447,6 +639,7 @@ function refreshInspect() {
   const actions = document.getElementById("inspect-actions");
   const note = document.getElementById("inspect-note");
   const upBtn = document.getElementById("inspect-upgrade");
+  const repairBtn = document.getElementById("inspect-repair");
   const sellBtn = document.getElementById("inspect-sell");
   actions.hidden = !own;
   if (!own) {
@@ -458,7 +651,18 @@ function refreshInspect() {
   const maxed = level >= MAX_LEVEL;
   const cost = upgradeCost(def, level);
   const free = mode === "sandbox";
-  renderUpgradeButton(upBtn, { maxed, cost, stock: state.you.stock, free });
+  const treasury = buildWallet(state.you);
+  renderUpgradeButton(upBtn, { maxed, cost, stock: treasury, free, label: "Покращити" });
+  const intact = b.hp >= b.maxHp - 0.5;
+  const rcost = repairCost(def, level);
+  renderUpgradeButton(repairBtn, {
+    maxed: intact,
+    cost: rcost,
+    stock: treasury,
+    free,
+    label: "Ремонт",
+    maxLabel: "Ціла",
+  });
   const value = sellValue(def, level);
   sellBtn.textContent = free ? "Продати" : `Продати (${formatCost(value)})`;
   if (def.harvest) {
@@ -471,21 +675,27 @@ function refreshInspect() {
   }
 }
 
-function renderUpgradeButton(btn, { maxed, cost, stock, free }) {
+function renderUpgradeButton(btn, { maxed, cost, stock, free, label = "Покращити", maxLabel = "Максимум" }) {
   if (maxed) {
     btn.disabled = true;
-    btn.dataset.sig = "max";
-    btn.textContent = "Максимум";
+    btn.dataset.sig = "max:" + maxLabel;
+    btn.textContent = maxLabel;
     return;
   }
-  btn.disabled = false;
-  const sig = `${free ? "free" : ""}:${JSON.stringify(cost)}:${stock.wood}|${stock.stone}|${stock.gold}`;
+  const sig = `${label}:${free ? "free" : ""}:${JSON.stringify(cost)}:${stock.wood}|${stock.stone}|${stock.gold}`;
+  let afford = true;
+  if (!free) {
+    for (const [k, v] of Object.entries(cost || {})) {
+      if (v && (stock[k] || 0) < v) afford = false;
+    }
+  }
+  btn.disabled = !afford;
   if (btn.dataset.sig === sig) return;
   btn.dataset.sig = sig;
   btn.textContent = "";
-  const label = document.createElement("span");
-  label.textContent = "Покращити";
-  btn.append(label);
+  const title = document.createElement("span");
+  title.textContent = label;
+  btn.append(title);
   if (free) return;
   const row = document.createElement("span");
   row.className = "cost-pips";
@@ -565,6 +775,9 @@ document.getElementById("inspect").addEventListener("click", (e) => {
 document.getElementById("inspect-upgrade").onclick = () => {
   if (inspectId) send({ type: "upgrade", id: inspectId });
 };
+document.getElementById("inspect-repair").onclick = () => {
+  if (inspectId) send({ type: "repair", id: inspectId });
+};
 document.getElementById("inspect-sell").onclick = () => {
   if (!inspectId) return;
   send({ type: "sell", id: inspectId });
@@ -586,6 +799,33 @@ document.getElementById("build-close").onclick = () => closeBuild();
 document.getElementById("build").addEventListener("click", (e) => {
   if (e.target.id === "build") closeBuild();
 });
+document.getElementById("tool-bulk-upgrade").onclick = () => {
+  const t = selectedToolType();
+  if (t === "*") {
+    toast("Оберіть конкретний тип для покращення");
+    return;
+  }
+  send({ type: "bulk_upgrade", buildType: t });
+};
+document.getElementById("tool-bulk-sell").onclick = () => {
+  const t = selectedToolType();
+  const label = t === "*" ? "усі споруди (крім цитаделі)" : BUILDINGS[t]?.name || t;
+  if (!confirm(`Продати ${label}? Це незворотно.`)) return;
+  send({ type: "bulk_sell", buildType: t });
+};
+document.getElementById("tool-blueprint-copy").onclick = () => {
+  send({ type: "blueprint_export", name: "Моя фортеця" });
+};
+document.getElementById("tool-blueprint-paste").onclick = () => {
+  const proto = loadBlueprintLocal();
+  if (!proto) {
+    toast("Спочатку скопіюйте фортецю");
+    return;
+  }
+  if (!confirm(`Вставити «${proto.name}» (${proto.buildings.length} споруд)? Потрібні ресурси / вільні клітинки.`)) return;
+  send({ type: "blueprint_paste", proto });
+};
+document.getElementById("tool-clear-hotkeys").onclick = () => clearAllHotkeys();
 sandboxToggle.onclick = () => setSandboxCollapsed(!panel.classList.contains("collapsed"));
 
 window.addEventListener("keydown", (e) => {
@@ -700,6 +940,15 @@ function updateGhost() {
     }
   }
   if (ok && mode !== "sandbox") {
+    if (selected === "core" && state.you.hasCore) ok = false;
+    if (selected !== "core") {
+      const own = (state.keeps || []).find((k) => k.team === playerId);
+      if (!state.you.hasCore || !own) ok = false;
+      else if (
+        fp.tx < own.tx || fp.ty < own.ty
+        || fp.tx + fp.w - 1 > own.tx1 || fp.ty + fp.h - 1 > own.ty1
+      ) ok = false;
+    }
     for (const keep of state.keeps || []) {
       if (keep.team === playerId) continue;
       if (fp.tx >= keep.tx && fp.ty >= keep.ty && fp.tx + fp.w - 1 <= keep.tx1 && fp.ty + fp.h - 1 <= keep.ty1) {
@@ -718,11 +967,35 @@ function syncHud() {
   document.getElementById("res-stone").textContent = y.stock.stone | 0;
   document.getElementById("res-gold").textContent = y.stock.gold | 0;
   document.getElementById("res-coins").textContent = y.coins | 0;
+  const treRow = document.getElementById("treasury-row");
+  if (y.hasCore && mode === "world") {
+    treRow.hidden = false;
+    treRow.classList.toggle("in-vault", !!y.inVault);
+    document.getElementById("tre-wood").textContent = (y.treasury?.wood || 0) | 0;
+    document.getElementById("tre-stone").textContent = (y.treasury?.stone || 0) | 0;
+    document.getElementById("tre-gold").textContent = (y.treasury?.gold || 0) | 0;
+  } else treRow.hidden = true;
   document.getElementById("hp-bar").style.width = `${Math.max(0, (y.hp / y.maxHp) * 100)}%`;
   deathEl.hidden = y.alive;
-  if (!y.alive) deathT.textContent = y.respawnIn.toFixed(1);
+  if (!y.alive) {
+    deathT.textContent = y.respawnIn.toFixed(1);
+    const msg = document.getElementById("death-msg");
+    if (y.hasCore) {
+      const ok = (y.treasury?.gold || 0) >= (y.respawnGold || 0);
+      msg.textContent = ok
+        ? `Відродження на цитаделі · ${y.respawnGold} золота`
+        : "Відродження далеко (нема золота в скарбниці)";
+    } else msg.textContent = "Відродження";
+  }
   refreshInspect();
   renderHero();
+  if (!buildEl.hidden) {
+    const key = catalogRefreshToken(y);
+    if (key !== catalogRefreshKey) {
+      catalogRefreshKey = key;
+      renderCatalog();
+    }
+  }
 }
 
 let last = performance.now();
