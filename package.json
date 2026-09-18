@@ -1,0 +1,18 @@
+{
+  "name": "hrad-io",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Top-down IO: harvest, fortify, hold. Sandbox for castle prototypes.",
+  "scripts": {
+    "start": "node server/index.mjs",
+    "dev": "node --watch server/index.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

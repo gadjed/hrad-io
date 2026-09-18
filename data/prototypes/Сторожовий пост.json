@@ -1,0 +1,186 @@
+{
+  "id": "Сторожовий пост",
+  "name": "Сторожовий пост",
+  "createdAt": "2026-09-18T09:13:20.421Z",
+  "updatedAt": "2026-09-18T09:13:20.425Z",
+  "origin": {
+    "tx": 0,
+    "ty": 0
+  },
+  "buildings": [
+    {
+      "type": "core",
+      "tx": -1,
+      "ty": -1,
+      "rot": 0
+    },
+    {
+      "type": "tower_arrow",
+      "tx": 1,
+      "ty": -2,
+      "rot": 0
+    },
+    {
+      "type": "goldmine",
+      "tx": -2,
+      "ty": 1,
+      "rot": 0
+    },
+    {
+      "type": "spikes",
+      "tx": 0,
+      "ty": -2,
+      "rot": 0
+    },
+    {
+      "type": "spikes",
+      "tx": 0,
+      "ty": 2,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -3,
+      "ty": -3,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -3,
+      "ty": -2,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -3,
+      "ty": -1,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -3,
+      "ty": 0,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -3,
+      "ty": 1,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -3,
+      "ty": 2,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -3,
+      "ty": 3,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -2,
+      "ty": -3,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -2,
+      "ty": 3,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -1,
+      "ty": -3,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -1,
+      "ty": 3,
+      "rot": 0
+    },
+    {
+      "type": "gate",
+      "tx": 0,
+      "ty": -3,
+      "rot": 0
+    },
+    {
+      "type": "gate",
+      "tx": 0,
+      "ty": 3,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 1,
+      "ty": -3,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 1,
+      "ty": 3,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 2,
+      "ty": -3,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 2,
+      "ty": 3,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 3,
+      "ty": -3,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 3,
+      "ty": -2,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 3,
+      "ty": -1,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 3,
+      "ty": 0,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 3,
+      "ty": 1,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 3,
+      "ty": 2,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 3,
+      "ty": 3,
+      "rot": 0
+    }
+  ]
+}

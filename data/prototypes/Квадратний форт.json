@@ -1,0 +1,384 @@
+{
+  "id": "Квадратний форт",
+  "name": "Квадратний форт",
+  "createdAt": "2026-09-18T09:13:20.423Z",
+  "updatedAt": "2026-09-18T09:13:20.425Z",
+  "origin": {
+    "tx": 0,
+    "ty": 0
+  },
+  "buildings": [
+    {
+      "type": "core",
+      "tx": -1,
+      "ty": -1,
+      "rot": 0
+    },
+    {
+      "type": "tower_arrow",
+      "tx": -4,
+      "ty": -4,
+      "rot": 0
+    },
+    {
+      "type": "tower_arrow",
+      "tx": 3,
+      "ty": -4,
+      "rot": 0
+    },
+    {
+      "type": "tower_cannon",
+      "tx": 3,
+      "ty": 3,
+      "rot": 0
+    },
+    {
+      "type": "mill",
+      "tx": -4,
+      "ty": 0,
+      "rot": 0
+    },
+    {
+      "type": "quarry",
+      "tx": 2,
+      "ty": 0,
+      "rot": 0
+    },
+    {
+      "type": "goldmine",
+      "tx": -1,
+      "ty": 2,
+      "rot": 0
+    },
+    {
+      "type": "spikes",
+      "tx": 0,
+      "ty": -4,
+      "rot": 0
+    },
+    {
+      "type": "spikes",
+      "tx": 0,
+      "ty": 4,
+      "rot": 0
+    },
+    {
+      "type": "spikes",
+      "tx": 4,
+      "ty": 0,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -5,
+      "ty": -5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -5,
+      "ty": -4,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -5,
+      "ty": -3,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -5,
+      "ty": -2,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -5,
+      "ty": -1,
+      "rot": 0
+    },
+    {
+      "type": "gate",
+      "tx": -5,
+      "ty": 0,
+      "rot": 1
+    },
+    {
+      "type": "wall_stone",
+      "tx": -5,
+      "ty": 1,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -5,
+      "ty": 2,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -5,
+      "ty": 3,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -5,
+      "ty": 4,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -5,
+      "ty": 5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -4,
+      "ty": -5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -4,
+      "ty": 5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -3,
+      "ty": -5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -3,
+      "ty": 5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -2,
+      "ty": -5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -2,
+      "ty": 5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -1,
+      "ty": -5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": -1,
+      "ty": 5,
+      "rot": 0
+    },
+    {
+      "type": "gate",
+      "tx": 0,
+      "ty": -5,
+      "rot": 0
+    },
+    {
+      "type": "gate",
+      "tx": 0,
+      "ty": 5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 1,
+      "ty": -5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 1,
+      "ty": 5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 2,
+      "ty": -5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 2,
+      "ty": 5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 3,
+      "ty": -5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 3,
+      "ty": 5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 4,
+      "ty": -5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 4,
+      "ty": 5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 5,
+      "ty": -5,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 5,
+      "ty": -4,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 5,
+      "ty": -3,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 5,
+      "ty": -2,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 5,
+      "ty": -1,
+      "rot": 0
+    },
+    {
+      "type": "gate",
+      "tx": 5,
+      "ty": 0,
+      "rot": 1
+    },
+    {
+      "type": "wall_stone",
+      "tx": 5,
+      "ty": 1,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 5,
+      "ty": 2,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 5,
+      "ty": 3,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 5,
+      "ty": 4,
+      "rot": 0
+    },
+    {
+      "type": "wall_stone",
+      "tx": 5,
+      "ty": 5,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -2,
+      "ty": -2,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -2,
+      "ty": -1,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -2,
+      "ty": 0,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -2,
+      "ty": 1,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -2,
+      "ty": 2,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": -1,
+      "ty": -2,
+      "rot": 0
+    },
+    {
+      "type": "gate",
+      "tx": 0,
+      "ty": -2,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 1,
+      "ty": -2,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 1,
+      "ty": 2,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 2,
+      "ty": -2,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 2,
+      "ty": -1,
+      "rot": 0
+    },
+    {
+      "type": "wall_wood",
+      "tx": 2,
+      "ty": 2,
+      "rot": 0
+    }
+  ]
+}

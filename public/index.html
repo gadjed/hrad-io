@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HRAD — жнива, мури, оборона</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Figtree:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="lobby">
+      <div class="mist"></div>
+      <div class="keep-silhouette"></div>
+      <div class="lobby-card">
+        <p class="eyebrow">IO · вид зверху</p>
+        <h1>HRAD</h1>
+        <p class="tagline">Добувайте. Зводьте мури. Тримайте цитадель.</p>
+        <label>
+          Ім'я
+          <input id="name" maxlength="16" placeholder="Воєвода" autocomplete="off" />
+        </label>
+        <button id="play" class="primary" type="button">Увійти в світ</button>
+        <div class="divider">адмін</div>
+        <label>
+          Пароль пісочниці
+          <input id="password" type="password" placeholder="admin" autocomplete="off" />
+        </label>
+        <button id="sandbox" class="ghost" type="button">Пісочниця прототипів</button>
+        <p id="lobby-error" class="error" hidden></p>
+        <p class="hint">
+          WASD — рух · ЛКМ — збір/удар · ПКМ — поставити · кнопка «Знести» або X — прибрати споруду
+        </p>
+      </div>
+    </div>
+
+    <div id="game" hidden>
+      <canvas id="view"></canvas>
+      <div id="hud">
+        <div class="top-left">
+          <div class="brand">HRAD</div>
+          <div id="mode-badge" class="badge">Світ</div>
+        </div>
+        <div class="resources">
+          <span data-res="wood"><i></i><b id="res-wood">0</b></span>
+          <span data-res="stone"><i></i><b id="res-stone">0</b></span>
+          <span data-res="gold"><i></i><b id="res-gold">0</b></span>
+        </div>
+        <div class="hp-wrap">
+          <div id="hp-bar"></div>
+        </div>
+        <canvas id="minimap" width="168" height="168"></canvas>
+        <div id="hotbar"></div>
+        <div id="build-hint"></div>
+        <div id="wreck-hint" hidden>ЛКМ — знести</div>
+        <div id="toasts"></div>
+        <div id="death" hidden>Відродження <span id="death-t">3</span></div>
+      </div>
+      <aside id="sandbox-panel" hidden>
+        <h2>Пісочниця</h2>
+        <p class="panel-copy">
+          Будуйте замок соло. Збережений прототип з'явиться в світі як цитадель НПС.
+        </p>
+        <label>
+          Назва прототипу
+          <input id="proto-name" maxlength="40" placeholder="Північний форт" />
+        </label>
+        <div class="row">
+          <button id="save-proto" type="button">Зберегти</button>
+          <button id="clear-proto" class="danger" type="button">Очистити</button>
+        </div>
+        <h3>Архів</h3>
+        <ul id="proto-list"></ul>
+      </aside>
+    </div>
+    <script type="module" src="/js/main.js"></script>
+  </body>
+</html>
