@@ -1,4 +1,4 @@
-import { TILE, WORLD_SIZE, RESOURCES } from "/shared/defs.mjs";
+import { TILE, WORLD_SIZE, RESOURCES, BUILDINGS, NODE_TYPES, harvestRadius } from "/shared/defs.mjs";
 
 function hash(x, y) {
   let n = x * 374761393 + y * 668265263;
@@ -18,7 +18,7 @@ export class Renderer {
     this.particles = [];
     this.dpr = 1;
     this.ghost = null;
-    this.wreck = null;
+    this.focus = null;
     this.mode = "world";
   }
 
@@ -101,8 +101,10 @@ export class Renderer {
     for (const l of state.loot) this.drawLoot(l);
     const buildings = [...state.buildings].sort((a, b) => a.y - b.y);
     for (const b of buildings) this.drawBuilding(b, youId);
-    if (this.wreck) this.drawWreck(this.wreck);
-    else if (this.ghost) this.drawGhost(this.ghost);
+    for (const b of buildings) this.drawBuildingHp(b, youId);
+    this.drawHarvestRange(this.focus || this.ghost, state.nodes);
+    if (this.focus) this.drawFocus(this.focus);
+    if (this.ghost && !this.focus) this.drawGhost(this.ghost);
     for (const u of [...state.units].sort((a, b) => a.y - b.y)) this.drawUnit(u, youId);
     for (const p of state.projectiles) this.drawShot(p);
     this.stepParticles(dt);
@@ -217,7 +219,66 @@ export class Renderer {
     ctx.fillStyle = "rgba(0,0,0,0.28)";
     ctx.fillRect(4, 6, w, h);
     drawKind(ctx, b.type, w, h, b.rot, b.team === youId);
-    if (b.hp < b.maxHp) bar(ctx, 6, h + 4, w - 12, b.hp / b.maxHp, b.team === youId ? "#7bed9f" : "#ff6b6b");
+    if ((b.level || 1) > 1) {
+      ctx.fillStyle = "rgba(12,16,14,0.75)";
+      ctx.fillRect(4, 4, 16, 12);
+      ctx.fillStyle = "#d7b056";
+      ctx.font = "bold 10px Figtree, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(String(b.level), 12, 13);
+    }
+    ctx.restore();
+  }
+
+  drawBuildingHp(b, youId) {
+    if (b.hp >= b.maxHp - 0.5) return;
+    const ctx = this.ctx;
+    const x = b.tx * TILE;
+    const y = b.ty * TILE;
+    const w = b.w * TILE;
+    ctx.save();
+    ctx.translate(x, y);
+    bar(ctx, 4, -8, w - 8, b.hp / b.maxHp, b.team === youId ? "#7bed9f" : "#ff6b6b");
+    ctx.restore();
+  }
+
+  drawHarvestRange(b, nodes) {
+    if (!b) return;
+    const def = BUILDINGS[b.type];
+    if (!def?.harvest) return;
+    const radius = harvestRadius(def, b.level || 1);
+    const cx = b.x ?? (b.tx + b.w / 2) * TILE;
+    const cy = b.y ?? (b.ty + b.h / 2) * TILE;
+    const ctx = this.ctx;
+    const r2 = radius * radius;
+    let sources = 0;
+    ctx.save();
+    for (const n of nodes || []) {
+      if (NODE_TYPES[n.kind]?.resource !== def.harvest.resource) continue;
+      const dx = n.x - cx;
+      const dy = n.y - cy;
+      if (dx * dx + dy * dy > r2) continue;
+      sources++;
+      const active = b.harvestTargetId && n.id === b.harvestTargetId;
+      ctx.strokeStyle = active ? "#f0d48a" : "#d7b056";
+      ctx.lineWidth = active ? 4 : 2;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, active ? 20 : 16, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    const color = sources ? "#d7b056" : "#c4453c";
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.85;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -234,28 +295,15 @@ export class Renderer {
     ctx.restore();
   }
 
-  drawWreck(b) {
+  drawFocus(b) {
     const ctx = this.ctx;
     const w = b.w * TILE;
     const h = b.h * TILE;
     ctx.save();
     ctx.translate(b.tx * TILE, b.ty * TILE);
-    ctx.fillStyle = "rgba(196, 69, 60, 0.45)";
-    ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = "#ff8b82";
+    ctx.strokeStyle = "#d7b056";
     ctx.lineWidth = 3;
-    ctx.strokeRect(2, 2, w - 4, h - 4);
-    ctx.beginPath();
-    ctx.moveTo(10, 10);
-    ctx.lineTo(w - 10, h - 10);
-    ctx.moveTo(w - 10, 10);
-    ctx.lineTo(10, h - 10);
-    ctx.stroke();
-    ctx.fillStyle = "#fff1ee";
-    ctx.font = "bold 13px Figtree, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("Знести", w / 2, h / 2);
+    ctx.strokeRect(1, 1, w - 2, h - 2);
     ctx.restore();
   }
 
@@ -376,9 +424,11 @@ function rounded(ctx, x, y, w, h, r) {
 
 function bar(ctx, x, y, w, t, color) {
   ctx.fillStyle = "#1a140c";
-  ctx.fillRect(x, y, w, 4);
+  ctx.fillRect(x, y, w, 6);
+  ctx.strokeStyle = "rgba(232, 223, 200, 0.35)";
+  ctx.strokeRect(x, y, w, 6);
   ctx.fillStyle = color;
-  ctx.fillRect(x, y, w * Math.max(0, Math.min(1, t)), 4);
+  ctx.fillRect(x, y, w * Math.max(0, Math.min(1, t)), 6);
 }
 
 function drawKind(ctx, type, w, h, rot, own) {
@@ -494,17 +544,6 @@ export function paintIcon(canvas, type) {
   const ctx = canvas.getContext("2d");
   canvas.width = 32;
   canvas.height = 32;
-  if (type === "demolish") {
-    ctx.strokeStyle = "#ff8b82";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(8, 8);
-    ctx.lineTo(24, 24);
-    ctx.moveTo(24, 8);
-    ctx.lineTo(8, 24);
-    ctx.stroke();
-    return;
-  }
   ctx.translate(2, 2);
   drawKind(ctx, type, 28, 28, 0, true);
 }

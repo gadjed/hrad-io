@@ -33,7 +33,7 @@
         <button id="sandbox" class="ghost" type="button">Пісочниця прототипів</button>
         <p id="lobby-error" class="error" hidden></p>
         <p class="hint">
-          WASD — рух · ЛКМ — збір/удар · ПКМ — поставити · кнопка «Знести» або X — прибрати споруду
+          WASD — рух · ЛКМ — збір / удар по ворожих спорудах · клік по своїй — картка · C — герой · B — будівництво
         </p>
       </div>
     </div>
@@ -49,32 +49,105 @@
           <span data-res="wood"><i></i><b id="res-wood">0</b></span>
           <span data-res="stone"><i></i><b id="res-stone">0</b></span>
           <span data-res="gold"><i></i><b id="res-gold">0</b></span>
+          <span data-res="coins"><i></i><b id="res-coins">0</b></span>
         </div>
         <div class="hp-wrap">
           <div id="hp-bar"></div>
         </div>
         <canvas id="minimap" width="168" height="168"></canvas>
-        <div id="hotbar"></div>
+        <div id="dock">
+          <button id="open-hero" type="button">Герой</button>
+          <button id="open-build" type="button">Будівництво</button>
+          <div id="hotbar"></div>
+        </div>
         <div id="build-hint"></div>
-        <div id="wreck-hint" hidden>ЛКМ — знести</div>
         <div id="toasts"></div>
         <div id="death" hidden>Відродження <span id="death-t">3</span></div>
       </div>
-      <aside id="sandbox-panel" hidden>
-        <h2>Пісочниця</h2>
-        <p class="panel-copy">
-          Будуйте замок соло. Збережений прототип з'явиться в світі як цитадель НПС.
-        </p>
-        <label>
-          Назва прототипу
-          <input id="proto-name" maxlength="40" placeholder="Північний форт" />
-        </label>
-        <div class="row">
-          <button id="save-proto" type="button">Зберегти</button>
-          <button id="clear-proto" class="danger" type="button">Очистити</button>
+      <div id="inspect" hidden>
+        <div class="inspect-card" role="dialog" aria-modal="true" aria-labelledby="inspect-name">
+          <button id="inspect-close" class="inspect-close" type="button" aria-label="Закрити">×</button>
+          <div class="inspect-head">
+            <canvas id="inspect-icon" width="56" height="56"></canvas>
+            <div>
+              <h2 id="inspect-name">Споруда</h2>
+              <p id="inspect-desc"></p>
+            </div>
+          </div>
+          <dl class="inspect-stats">
+            <div>
+              <dt>Стан</dt>
+              <dd id="inspect-status">Ціла</dd>
+            </div>
+            <div>
+              <dt>Міцність</dt>
+              <dd>
+                <span id="inspect-hp">0 / 0</span>
+                <div class="mini-bar"><i id="inspect-hpbar"></i></div>
+              </dd>
+            </div>
+            <div>
+              <dt>Рівень</dt>
+              <dd id="inspect-level">1 / 5</dd>
+            </div>
+            <div>
+              <dt>Ефект</dt>
+              <dd id="inspect-effect"></dd>
+            </div>
+            <div id="inspect-radius-row" hidden>
+              <dt>Радіус</dt>
+              <dd id="inspect-radius"></dd>
+            </div>
+            <div id="inspect-speed-row" hidden>
+              <dt>Швидкість</dt>
+              <dd id="inspect-speed"></dd>
+            </div>
+          </dl>
+          <div id="inspect-actions" class="inspect-actions">
+            <button id="inspect-upgrade" type="button">Покращити</button>
+            <button id="inspect-sell" class="danger" type="button">Продати</button>
+          </div>
+          <p id="inspect-note" class="inspect-note" hidden></p>
         </div>
-        <h3>Архів</h3>
-        <ul id="proto-list"></ul>
+      </div>
+      <div id="hero" hidden>
+        <div class="hero-card" role="dialog" aria-modal="true" aria-labelledby="hero-title">
+          <button id="hero-close" class="inspect-close" type="button" aria-label="Закрити">×</button>
+          <h2 id="hero-title">Герой</h2>
+          <p class="build-copy">Прокачка за монети. Монети падають з НПС і зруйнованих ворожих споруд.</p>
+          <p id="hero-coins" class="build-assign">Монети: 0</p>
+          <div id="hero-list"></div>
+        </div>
+      </div>
+      <div id="build" hidden>
+        <div class="build-card" role="dialog" aria-modal="true" aria-labelledby="build-title">
+          <button id="build-close" class="inspect-close" type="button" aria-label="Закрити">×</button>
+          <h2 id="build-title">Будівництво</h2>
+          <p class="build-copy">Оберіть споруду, потім натисніть слот 1–0 або клікніть хоткей внизу.</p>
+          <p id="build-assign" class="build-assign" hidden></p>
+          <div id="build-catalog"></div>
+        </div>
+      </div>
+      <aside id="sandbox-panel" hidden>
+        <header class="sandbox-head">
+          <h2>Пісочниця</h2>
+          <button id="sandbox-toggle" type="button" aria-expanded="true">Згорнути</button>
+        </header>
+        <div id="sandbox-body">
+          <p class="panel-copy">
+            Будуйте замок соло. Збережений прототип з'явиться в світі як цитадель НПС.
+          </p>
+          <label>
+            Назва прототипу
+            <input id="proto-name" maxlength="40" placeholder="Північний форт" />
+          </label>
+          <div class="row">
+            <button id="save-proto" type="button">Зберегти</button>
+            <button id="clear-proto" class="danger" type="button">Очистити</button>
+          </div>
+          <h3>Архів</h3>
+          <ul id="proto-list"></ul>
+        </div>
       </aside>
     </div>
     <script type="module" src="/js/main.js"></script>

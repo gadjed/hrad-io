@@ -6,11 +6,13 @@ import { fileURLToPath } from "node:url";
 import { TICK_RATE, ADMIN_PASSWORD, WORLD_TILES } from "../shared/defs.mjs";
 import { PrototypeStore } from "./PrototypeStore.mjs";
 import { World } from "./World.mjs";
+import { WorldStore } from "./WorldStore.mjs";
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dir, "..");
 const PORT = Number(process.env.PORT || 3000);
 const password = process.env.ADMIN_PASSWORD || ADMIN_PASSWORD;
+const TOKEN_RE = /^p_[a-z0-9]{8,32}$/i;
 
 const app = express();
 app.use("/shared", express.static(path.join(root, "shared")));
@@ -20,17 +22,30 @@ const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer });
 
 const store = new PrototypeStore();
+const worldStore = new WorldStore(path.join(root, "data/world.sqlite"));
 const rooms = {
   world: null,
   sandbox: null,
 };
 
 function ensureWorld() {
-  if (!rooms.world) {
-    rooms.world = new World({ mode: "world", prototypes: store });
+  if (rooms.world) return rooms.world;
+  rooms.world = new World({ mode: "world", prototypes: store });
+  const snap = worldStore.load();
+  if (snap) {
+    rooms.world.hydrate(snap);
+    rooms.world.catchUp((Date.now() - snap.savedAt) / 1000);
+    console.log(`Світ відновлено · ${rooms.world.buildings.size} споруд · AFK ${(Math.max(0, Date.now() - snap.savedAt) / 1000) | 0}с`);
+  } else {
     rooms.world.generate();
+    persistWorld();
   }
   return rooms.world;
+}
+
+function persistWorld() {
+  if (!rooms.world) return;
+  worldStore.save(rooms.world.serialize());
 }
 
 function ensureSandbox() {
@@ -80,6 +95,18 @@ function handle(client, msg) {
     client.room.setInput(client.player.id, msg);
     return;
   }
+  if (msg.type === "upgrade") {
+    client.room.upgradeBuilding(client.player.id, msg.id);
+    return;
+  }
+  if (msg.type === "sell") {
+    client.room.sellBuilding(client.player.id, msg.id);
+    return;
+  }
+  if (msg.type === "hero_upgrade") {
+    client.room.upgradeHero(client.player.id, msg.stat);
+    return;
+  }
   if (client.mode !== "sandbox") return;
   sandboxCommand(client, msg);
 }
@@ -100,7 +127,17 @@ function join(client, msg) {
       }
     }
   }
-  const player = room.addPlayer(msg.name, msg.color);
+  const player = room.addPlayer(msg.name, {
+    skin: msg.color,
+    token: mode === "world" && TOKEN_RE.test(msg.token || "") ? msg.token : null,
+  });
+  for (const c of clients.values()) {
+    if (c !== client && c.player?.id === player.id) {
+      c.player = null;
+      c.room = null;
+      try { c.socket.close(); } catch { /* ignore */ }
+    }
+  }
   client.player = player;
   client.room = room;
   client.mode = mode;
@@ -177,20 +214,39 @@ function send(socket, payload) {
 }
 
 setInterval(() => {
-  for (const room of [rooms.world, rooms.sandbox]) {
-    if (!room) continue;
-    const occupied = [...clients.values()].some((c) => c.room === room);
-    if (!occupied) continue;
-    room.step();
-    const mini = room.minimap();
+  if (rooms.world) {
+    rooms.world.step();
+    const mini = rooms.world.minimap();
     for (const c of clients.values()) {
-      if (c.room !== room || !c.player) continue;
-      const you = room.players.get(c.player.id);
+      if (c.room !== rooms.world || !c.player) continue;
+      const you = rooms.world.players.get(c.player.id);
       if (!you) continue;
-      send(c.socket, { type: "state", state: room.snapshotFor(you), minimap: mini });
+      send(c.socket, { type: "state", state: rooms.world.snapshotFor(you), minimap: mini });
+    }
+  }
+  if (rooms.sandbox) {
+    const occupied = [...clients.values()].some((c) => c.room === rooms.sandbox);
+    if (!occupied) return;
+    rooms.sandbox.step();
+    const mini = rooms.sandbox.minimap();
+    for (const c of clients.values()) {
+      if (c.room !== rooms.sandbox || !c.player) continue;
+      const you = rooms.sandbox.players.get(c.player.id);
+      if (!you) continue;
+      send(c.socket, { type: "state", state: rooms.sandbox.snapshotFor(you), minimap: mini });
     }
   }
 }, 1000 / TICK_RATE);
+
+setInterval(() => persistWorld(), 5000);
+
+function shutdown() {
+  persistWorld();
+  try { worldStore.close(); } catch { /* ignore */ }
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 await store.init();
 ensureWorld();

@@ -11,9 +11,10 @@ export const PLAYER = {
   radius: 16,
   speed: 210,
   hp: 120,
-  harvestRange: 52,
+  harvestRange: 64,
   harvestDmg: 18,
-  attackDmg: 16,
+  attackDmg: 18,
+  attackRange: 88,
   attackCooldown: 0.28,
   placeRange: 220,
   respawnDelay: 3,
@@ -34,6 +35,60 @@ export const RESOURCES = {
   stone: { label: "Камінь", color: "#9aa4b2" },
   gold: { label: "Золото", color: "#efc94a" },
 };
+
+export const HERO = {
+  maxLevel: 8,
+  stats: {
+    speed: { id: "speed", name: "Швидкість", desc: "Біжите швидше.", per: 0.08, cost: 8 },
+    might: { id: "might", name: "Сила", desc: "Сильніший удар і збір.", per: 0.14, cost: 10 },
+    armor: { id: "armor", name: "Броня", desc: "Поглинає частину шкоди.", per: 0.07, cost: 10 },
+    vigor: { id: "vigor", name: "Живучість", desc: "Більше здоров'я.", per: 0.12, cost: 9 },
+    regen: { id: "regen", name: "Регенерація", desc: "Повільно відновлює здоров'я.", per: 1.4, cost: 12 },
+  },
+};
+
+export function emptyHero() {
+  return { speed: 0, might: 0, armor: 0, vigor: 0, regen: 0 };
+}
+
+export function parseHero(raw) {
+  const base = emptyHero();
+  let src = raw;
+  if (typeof raw === "string") {
+    try { src = JSON.parse(raw); } catch { src = {}; }
+  }
+  for (const key of Object.keys(base)) {
+    const n = Number(src?.[key] || 0);
+    base[key] = clamp(Number.isFinite(n) ? n : 0, 0, HERO.maxLevel);
+  }
+  return base;
+}
+
+export function heroUpgradeCost(stat, level) {
+  const def = HERO.stats[stat];
+  if (!def) return 0;
+  return Math.max(1, Math.ceil(def.cost * (1 + Math.max(0, level) * 0.7)));
+}
+
+export function playerSpeed(hero) {
+  return PLAYER.speed * (1 + (hero?.speed || 0) * HERO.stats.speed.per);
+}
+
+export function playerMaxHp(hero) {
+  return Math.round(PLAYER.hp * (1 + (hero?.vigor || 0) * HERO.stats.vigor.per));
+}
+
+export function playerDamage(hero, base) {
+  return Math.round(base * (1 + (hero?.might || 0) * HERO.stats.might.per));
+}
+
+export function playerArmorMul(hero) {
+  return Math.max(0.45, 1 - (hero?.armor || 0) * HERO.stats.armor.per);
+}
+
+export function playerRegen(hero) {
+  return (hero?.regen || 0) * HERO.stats.regen.per;
+}
 
 export const NODE_TYPES = {
   tree: {
@@ -106,35 +161,35 @@ export const BUILDINGS = {
   mill: {
     id: "mill",
     name: "Лісопилка",
-    desc: "Добуває дерево.",
+    desc: "Ріже дерева в радіусі.",
     w: 2,
     h: 2,
     hp: 200,
     cost: { wood: 35, stone: 10 },
     category: "harvest",
-    produces: { resource: "wood", amount: 1, every: 2.4 },
+    harvest: { resource: "wood", radius: 288, every: 1.35, damage: 12 },
   },
   quarry: {
     id: "quarry",
     name: "Каменоломня",
-    desc: "Добуває камінь.",
+    desc: "Ломає камінь у радіусі.",
     w: 2,
     h: 2,
     hp: 220,
     cost: { wood: 25, stone: 20 },
     category: "harvest",
-    produces: { resource: "stone", amount: 1, every: 2.8 },
+    harvest: { resource: "stone", radius: 288, every: 1.55, damage: 14 },
   },
   goldmine: {
     id: "goldmine",
     name: "Золота копальня",
-    desc: "Добуває золото.",
+    desc: "Добуває золоті жили в радіусі.",
     w: 2,
     h: 2,
     hp: 240,
     cost: { wood: 30, stone: 30, gold: 8 },
     category: "harvest",
-    produces: { resource: "gold", amount: 1, every: 4.2 },
+    harvest: { resource: "gold", radius: 288, every: 2.0, damage: 16 },
   },
   tower_arrow: {
     id: "tower_arrow",
@@ -171,18 +226,14 @@ export const BUILDINGS = {
   },
 };
 
-export const HOTBAR = [
-  "wall_wood",
-  "wall_stone",
-  "gate",
-  "mill",
-  "quarry",
-  "goldmine",
-  "tower_arrow",
-  "tower_cannon",
-  "spikes",
-  "core",
+export const BUILD_CATEGORIES = [
+  { id: "wall", name: "Мури" },
+  { id: "harvest", name: "Видобуток" },
+  { id: "defense", name: "Оборона" },
+  { id: "keep", name: "Цитадель" },
 ];
+
+export const HOTBAR_SIZE = 10;
 
 export const TEAM_COLORS = [
   "#4ecdc4",
@@ -256,8 +307,85 @@ export function payCost(stock, cost, free) {
   }
 }
 
-export function refundCost(stock, cost, factor = 0.5) {
-  for (const [k, v] of Object.entries(cost || {})) {
-    stock[k] = (stock[k] || 0) + Math.floor(v * factor);
+export const MAX_LEVEL = 5;
+
+export function levelScale(level) {
+  return 1 + (Math.max(1, level) - 1) * 0.28;
+}
+
+export function buildingMaxHp(def, level) {
+  return Math.round(def.hp * levelScale(level));
+}
+
+export function harvestRadius(def, level) {
+  if (!def.harvest) return 0;
+  return Math.round(def.harvest.radius * (1 + (Math.max(1, level) - 1) * 0.22));
+}
+
+export function harvestPeriod(def, level) {
+  if (!def.harvest) return 0;
+  return def.harvest.every / (1 + (Math.max(1, level) - 1) * 0.18);
+}
+
+export function harvestDamage(def, level) {
+  if (!def.harvest) return 0;
+  return Math.round(def.harvest.damage * levelScale(level));
+}
+
+export function upgradeCost(def, level) {
+  const out = {};
+  for (const [k, v] of Object.entries(def.cost || {})) {
+    out[k] = Math.max(1, Math.ceil(v * (0.55 + 0.55 * level)));
   }
+  return out;
+}
+
+export function investedCost(def, level) {
+  const total = { ...def.cost };
+  for (let l = 1; l < level; l++) {
+    const step = upgradeCost(def, l);
+    for (const [k, v] of Object.entries(step)) {
+      total[k] = (total[k] || 0) + v;
+    }
+  }
+  return total;
+}
+
+export function sellValue(def, level) {
+  const out = {};
+  for (const [k, v] of Object.entries(investedCost(def, level))) {
+    out[k] = Math.max(1, Math.floor(v * 0.6));
+  }
+  return out;
+}
+
+export function formatCost(cost) {
+  return Object.entries(cost || {})
+    .map(([k, v]) => `${v} ${RESOURCES[k]?.label || k}`)
+    .join(" · ");
+}
+
+export function buildingStatus(hp, maxHp) {
+  const r = hp / Math.max(1, maxHp);
+  if (r >= 0.98) return { id: "intact", label: "Ціла" };
+  if (r >= 0.55) return { id: "worn", label: "Пошкоджена" };
+  return { id: "critical", label: "Критична" };
+}
+
+export function buildingEffect(def, level) {
+  const s = levelScale(level);
+  if (def.harvest) {
+    const tiles = (harvestRadius(def, level) / TILE).toFixed(1);
+    const every = harvestPeriod(def, level).toFixed(1);
+    return `${RESOURCES[def.harvest.resource].label} · радіус ${tiles} кл. · ${every}с`;
+  }
+  if (def.turret) {
+    const dmg = Math.round(def.turret.damage * s);
+    const range = Math.round(def.turret.range * (1 + (level - 1) * 0.08));
+    return `Урон ${dmg} · дальність ${range}`;
+  }
+  if (def.contact) {
+    return `Контактний урон ${Math.round(def.contact.damage * s)}`;
+  }
+  return `Міцність ${buildingMaxHp(def, level)}`;
 }
