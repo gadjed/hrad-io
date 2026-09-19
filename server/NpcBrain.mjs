@@ -30,6 +30,7 @@ export class NpcBrain {
 
   tickFaction(f, opts) {
     const world = this.world;
+    if (f.plannerLocked) return;
     world.ensureFaction(f);
     const core = world.factionCore(f);
     if (!core) {

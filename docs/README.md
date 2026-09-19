@@ -34,7 +34,8 @@ source venv/bin/activate
 pip install -r requirements-rl.txt
 
 # Тренування на живому World (1 env → одразу збір rollouts)
-python scripts/train-rl-ollama.py --n-envs 1 --timesteps 1000000
+python scripts/train-rl-ollama.py --n-envs 1 --timesteps 1000000 --no-eval
+# або: npm run planner:train
 
 # Те саме + Ollama scoring
 python scripts/train-rl-ollama.py --n-envs 1 --use-ollama --ollama-model gemma4:e4b
