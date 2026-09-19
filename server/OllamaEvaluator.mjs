@@ -26,12 +26,26 @@ export class OllamaEvaluator {
 
   /** @returns {Promise<number>} score 0–10 */
   async evaluateDecision(observation, decision) {
+    const result = await this.evaluateDetailed(observation, decision);
+    return result.score;
+  }
+
+  /** @returns {Promise<{score:number,raw:string,ms:number,cached:boolean,error:string|null,model:string}>} */
+  async evaluateDetailed(observation, decision) {
     const cacheKey = this.hashDecision(observation, decision);
     if (this.cache.has(cacheKey)) {
       this.stats.cacheHits++;
-      return this.cache.get(cacheKey);
+      return {
+        score: this.cache.get(cacheKey),
+        raw: "",
+        ms: 0,
+        cached: true,
+        error: null,
+        model: this.model,
+      };
     }
 
+    const started = Date.now();
     try {
       const response = await fetch(`${this.url}/api/generate`, {
         method: "POST",
@@ -40,22 +54,38 @@ export class OllamaEvaluator {
           model: this.model,
           prompt: this.buildPrompt(observation, decision),
           stream: false,
-          options: { temperature: 0.3, num_predict: 50 },
+          think: false,
+          options: { temperature: 0.3, num_predict: 16 },
         }),
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(15000),
       });
 
       if (!response.ok) throw new Error(`Ollama ${response.status}`);
 
       const data = await response.json();
-      const score = this.parseScore(data.response);
+      const raw = String(data.response || "").trim();
+      const score = this.parseScore(raw);
       this.addToCache(cacheKey, score);
       this.stats.evaluations++;
-      return score;
+      return {
+        score,
+        raw,
+        ms: Date.now() - started,
+        cached: false,
+        error: null,
+        model: this.model,
+      };
     } catch (err) {
       this.stats.errors++;
       console.error("Ollama evaluation failed:", err.message);
-      return 5.0;
+      return {
+        score: 5.0,
+        raw: "",
+        ms: Date.now() - started,
+        cached: false,
+        error: err.message || String(err),
+        model: this.model,
+      };
     }
   }
 

@@ -497,7 +497,7 @@ export function encodeObservation(obs) {
   return features.slice(0, OBS_DIM);
 }
 
-export function calculateUtility(obs) {
+export function utilityBreakdown(obs) {
   const t = obs.treasury || {};
   const buildings = obs.buildings || [];
   const ring = obs.ring || {};
@@ -533,8 +533,12 @@ export function calculateUtility(obs) {
   const keepTiles = keep ? Math.max(1, (keep.tx1 - keep.tx + 1) * (keep.ty1 - keep.ty + 1)) : 1;
   const F = 30 * Math.min(used / keepTiles, 1);
   const W = 15 * harvestZero + 8 * ((ring.integrity || 0) < 0.5 ? 1 : 0);
+  const U = 1.0 * E + 0.85 * D + 1.2 * S + 0.4 * F - 0.9 * W;
+  return { E, D, S, F, W, U, towers, spikes, gates, harvestZero, used, keepTiles, coreRatio, wallHp, cov };
+}
 
-  return 1.0 * E + 0.85 * D + 1.2 * S + 0.4 * F - 0.9 * W;
+export function calculateUtility(obs) {
+  return utilityBreakdown(obs).U;
 }
 
 export function lockNpcBrains(world) {
