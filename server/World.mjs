@@ -157,6 +157,37 @@ export class World {
     return factionId;
   }
 
+  /**
+   * Stamp harvest/towers from a sandbox prototype, skipping core/walls/gates/spikes.
+   * Coordinates in the proto are relative to its core origin.
+   */
+  stampLayoutSeed(factionId, proto) {
+    const core = this.factionCore(factionId);
+    if (!core || !proto?.buildings) return 0;
+    const skip = new Set(["core", "wall_wood", "wall_stone", "gate", "spikes"]);
+    let n = 0;
+    for (const b of proto.buildings) {
+      if (!b?.type || skip.has(b.type)) continue;
+      const placed = this.createBuilding({
+        type: b.type,
+        tx: core.tx + b.tx,
+        ty: core.ty + b.ty,
+        rot: b.rot || 0,
+        ownerId: factionId,
+        team: factionId,
+        level: b.level || 1,
+      });
+      if (placed) n += 1;
+    }
+    this.rebuildOccupancy();
+    return n;
+  }
+
+  restoreLayoutSeed(factionId, proto) {
+    this.stripSettlementToCore(factionId);
+    return this.stampLayoutSeed(factionId, proto);
+  }
+
   stripSettlementToCore(settlementId) {
     for (const b of [...this.buildings.values()]) {
       if ((b.team === settlementId || b.ownerId === settlementId) && b.type !== "core") {

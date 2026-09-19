@@ -130,8 +130,7 @@ function connect(joinMode) {
       type: "join",
       name: nameInput.value.trim() || "Воєвода",
       mode: joinMode,
-      password: passInput.value,
-      password: worldPassInput?.value || "",
+      password: joinMode === "sandbox" ? passInput.value : (worldPassInput?.value || ""),
       token: accountTokenForName(nameInput.value.trim() || "Воєвода"),
     }));
   });

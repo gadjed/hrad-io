@@ -4,6 +4,7 @@ node_modules/
 data/world.sqlite
 data/world.sqlite-wal
 data/world.sqlite-shm
+data/train-launch.json
 data/training/
 models/
 logs/

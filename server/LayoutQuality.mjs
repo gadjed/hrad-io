@@ -254,3 +254,314 @@ export function layoutQuality(obs) {
   const clog = clogPenalty(obs);
   return { P, overlap, clog, towers: towerCount(obs) };
 }
+
+/** 0 = flush only. A 1-tile gap next to the citadel is space for illegal walls. */
+const MAX_COMPACT_GAP = 0;
+
+export function layoutCensus(obs) {
+  const counts = {
+    mill: 0,
+    quarry: 0,
+    goldmine: 0,
+    tower: 0,
+    tower_arrow: 0,
+    wall: 0,
+    spikes: 0,
+    core: 0,
+    gates: 0,
+  };
+  for (const b of obs.buildings || []) {
+    if (b.type === "mill") counts.mill += 1;
+    else if (b.type === "quarry") counts.quarry += 1;
+    else if (b.type === "goldmine") counts.goldmine += 1;
+    else if (b.type === "tower_arrow") {
+      counts.tower_arrow += 1;
+      counts.tower += 1;
+    } else if (b.type === "tower_cannon") counts.tower += 1;
+    else if (b.type === "gate") {
+      counts.gates += 1;
+      counts.wall += 1;
+    } else if (WALL.has(b.type)) counts.wall += 1;
+    else if (b.type === "spikes") counts.spikes += 1;
+    else if (b.type === "core") counts.core += 1;
+  }
+  return counts;
+}
+
+function footprintOf(b) {
+  if (!b) return null;
+  const def = BUILDINGS[b.type];
+  return {
+    tx: b.tx,
+    ty: b.ty,
+    w: b.w || def?.w || 1,
+    h: b.h || def?.h || 1,
+  };
+}
+
+/** Empty cells between two footprints (0 = flush, 1 = one-tile gap). */
+export function cellGap(a, b) {
+  if (!a || !b || a.tx == null || b.tx == null) return 99;
+  const a1x = a.tx + (a.w || 1) - 1;
+  const a1y = a.ty + (a.h || 1) - 1;
+  const b1x = b.tx + (b.w || 1) - 1;
+  const b1y = b.ty + (b.h || 1) - 1;
+  const dx = Math.max(0, b.tx - a1x - 1, a.tx - b1x - 1);
+  const dy = Math.max(0, b.ty - a1y - 1, a.ty - b1y - 1);
+  return Math.max(dx, dy);
+}
+
+function actionFootprint(action, type) {
+  const def = BUILDINGS[type];
+  return {
+    tx: action.tx,
+    ty: action.ty,
+    w: def?.w || 1,
+    h: def?.h || 1,
+  };
+}
+
+function coreOf(obs) {
+  const b = (obs.buildings || []).find((x) => x.type === "core");
+  if (b) return b;
+  const c = obs.core;
+  if (!c) return null;
+  return { ...c, type: "core", w: c.w || 2, h: c.h || 2 };
+}
+
+function compactInteriors(obs) {
+  const core = coreOf(obs);
+  const out = [];
+  for (const b of obs.buildings || []) {
+    if (WALL.has(b.type) || b.type === "spikes") continue;
+    if (b.type === "core") {
+      out.push(b);
+      continue;
+    }
+    if (core && cellGap(footprintOf(core), footprintOf(b)) <= MAX_COMPACT_GAP) out.push(b);
+  }
+  return out;
+}
+
+function footprintBlocked(obs, fp) {
+  if (!fp || fp.tx == null) return true;
+  const occ = occMap(obs);
+  const w = fp.w || 1;
+  const h = fp.h || 1;
+  for (let dy = 0; dy < h; dy++) {
+    for (let dx = 0; dx < w; dx++) {
+      if (occ.has(key(fp.tx + dx, fp.ty + dy))) return true;
+    }
+  }
+  return false;
+}
+
+function withGhost(obs, action, type) {
+  const def = BUILDINGS[type];
+  return {
+    ...obs,
+    buildings: [
+      ...(obs.buildings || []),
+      {
+        type,
+        tx: action.tx,
+        ty: action.ty,
+        w: def?.w || 1,
+        h: def?.h || 1,
+        level: 1,
+      },
+    ],
+  };
+}
+
+function hasFlushSite(obs, type) {
+  return countFlushSites(obs, type) > 0;
+}
+
+function countFlushSites(obs, type) {
+  const core = coreOf(obs);
+  const keep = obs.keep;
+  if (!core || !keep) return 0;
+  const def = BUILDINGS[type];
+  const w = def?.w || 1;
+  const h = def?.h || 1;
+  const cfp = footprintOf(core);
+  let n = 0;
+  for (let ty = keep.ty; ty + h - 1 <= keep.ty1; ty++) {
+    for (let tx = keep.tx; tx + w - 1 <= keep.tx1; tx++) {
+      const fp = { tx, ty, w, h };
+      if (cellGap(cfp, fp) > MAX_COMPACT_GAP) continue;
+      if (footprintBlocked(obs, fp)) continue;
+      if (type !== "core" && !WALL.has(type) && footprintOnContour(keep, fp)) continue;
+      n += 1;
+    }
+  }
+  return n;
+}
+
+function farFromCore(obs, fp) {
+  const core = coreOf(obs);
+  if (!core || !fp || fp.tx == null) return true;
+  return cellGap(footprintOf(core), fp) > MAX_COMPACT_GAP;
+}
+
+function farFromCluster(obs, fp) {
+  if (!fp || fp.tx == null) return true;
+  const cluster = compactInteriors(obs);
+  if (!cluster.length) return true;
+  let best = 99;
+  for (const b of cluster) {
+    const g = cellGap(footprintOf(b), fp);
+    if (g < best) best = g;
+  }
+  return best > MAX_COMPACT_GAP;
+}
+
+function clusterBBox(obs) {
+  const cluster = compactInteriors(obs);
+  if (!cluster.length) return null;
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const b of cluster) {
+    const fp = footprintOf(b);
+    x0 = Math.min(x0, fp.tx);
+    y0 = Math.min(y0, fp.ty);
+    x1 = Math.max(x1, fp.tx + (fp.w || 1) - 1);
+    y1 = Math.max(y1, fp.ty + (fp.h || 1) - 1);
+  }
+  return { x0, y0, x1, y1 };
+}
+
+/** Walls belong on the outer rectangle around the cluster, not in pockets beside the citadel. */
+function wallPlacementReason(obs, fp) {
+  if (!fp || fp.tx == null) return "wall_too_far";
+  const bbox = clusterBBox(obs);
+  if (!bbox) return "wall_too_far";
+  const { x0, y0, x1, y1 } = bbox;
+  const tx = fp.tx;
+  const ty = fp.ty;
+  if (tx < x0 - 1 || tx > x1 + 1 || ty < y0 - 1 || ty > y1 + 1) return "wall_too_far";
+  if (tx > x0 && tx < x1 && ty > y0 && ty < y1) {
+    const core = coreOf(obs);
+    if (core && cellGap(footprintOf(core), fp) === 0) return "wall_against_core";
+    return "wall_inside";
+  }
+  if (farFromCluster(obs, fp)) return "wall_too_far";
+  return null;
+}
+
+function hasCompact(obs, type) {
+  const core = coreOf(obs);
+  if (!core) return false;
+  return (obs.buildings || []).some(
+    (b) => b.type === type && cellGap(footprintOf(core), footprintOf(b)) <= MAX_COMPACT_GAP
+  );
+}
+
+/** mill → quarry → goldmine → arrow tower → tight wall hull. */
+export function openingPhase(obs) {
+  if (!hasCompact(obs, "mill")) return "need_mill";
+  if (!hasCompact(obs, "quarry")) return "need_quarry";
+  if (!hasCompact(obs, "goldmine")) return "need_goldmine";
+  if (!hasCompact(obs, "tower_arrow")) return "need_tower";
+  const core = coreOf(obs);
+  if (core && enclosureLevel(obs, core) < 1) return "need_ring";
+  return "layout";
+}
+
+const PHASE_NEXT = {
+  need_mill: "place mill flush against the citadel",
+  need_quarry: "place quarry flush against the citadel",
+  need_goldmine: "place goldmine flush against the citadel",
+  need_tower: "place arrow tower flush against the citadel",
+  need_ring: "place a solid outer wall around the buildings, not against the citadel inside",
+  layout: "keep is enclosed; optional polish",
+};
+
+export function openingPhaseHint(phase) {
+  return PHASE_NEXT[phase] || PHASE_NEXT.layout;
+}
+
+function verdict(phase, score, reason, extra = {}) {
+  return {
+    phase,
+    score,
+    ok: score > 7,
+    punish: score <= 3,
+    deferOllama: false,
+    reason,
+    ...extra,
+  };
+}
+
+function compactPlace(phase, before, action, expected, okReason) {
+  if (action.op !== "place" || action.type !== expected) {
+    return verdict(phase, 1, `expected_${expected}`);
+  }
+  const fp = actionFootprint(action, expected);
+  if (farFromCore(before, fp)) return verdict(phase, 1, "too_far_from_core");
+  if (expected === "mill" || expected === "quarry" || expected === "goldmine") {
+    const ghost = withGhost(before, action, expected);
+    const need = expected === "mill" ? 3 : expected === "quarry" ? 2 : 1;
+    if (countFlushSites(ghost, "tower_arrow") < need) return verdict(phase, 1, "blocks_tower");
+  }
+  return verdict(phase, 8, okReason);
+}
+
+function countType(obs, type) {
+  return (obs.buildings || []).filter((b) => b.type === type).length;
+}
+
+function extraPlace(phase, before, type) {
+  if (type === "mill" && countType(before, "mill") >= 1) return verdict(phase, 1, "extra_mill");
+  if (type === "quarry" && countType(before, "quarry") >= 1) return verdict(phase, 1, "extra_quarry");
+  if (type === "goldmine" && countType(before, "goldmine") >= 1) return verdict(phase, 1, "extra_goldmine");
+  if (type === "tower_arrow" && countType(before, "tower_arrow") >= 1) return verdict(phase, 1, "extra_tower");
+  if (type === "tower_cannon") return verdict(phase, 1, "expected_tower_arrow");
+  return null;
+}
+
+/**
+ * Hard local teacher (no Ollama): compact mill→quarry→goldmine→arrow→walls.
+ */
+export function scoreLayoutDecision(before, decision, after) {
+  const phase = openingPhase(before);
+  const action = decision?.action || decision || {};
+  const op = action.op || "wait";
+  const type = action.type || null;
+
+  if (op === "sell") return verdict(phase, 1, "sell");
+  if (op === "wait") return verdict(phase, 1, "expected_build");
+
+  if (phase !== "layout" && op === "place") {
+    const extra = extraPlace(phase, before, type);
+    if (extra) return extra;
+  }
+
+  if (phase === "need_mill") return compactPlace(phase, before, action, "mill", "opening_mill");
+  if (phase === "need_quarry") return compactPlace(phase, before, action, "quarry", "opening_quarry");
+  if (phase === "need_goldmine") return compactPlace(phase, before, action, "goldmine", "opening_goldmine");
+  if (phase === "need_tower") return compactPlace(phase, before, action, "tower_arrow", "opening_tower");
+
+  if (phase === "need_ring") {
+    if (type !== "wall_wood" && type !== "wall_stone") {
+      return verdict(phase, 1, "expected_wall");
+    }
+    const fp = actionFootprint(action, type);
+    const bad = wallPlacementReason(before, fp);
+    if (bad) return verdict(phase, 1, bad);
+    const closed = openingPhase(after || before) === "layout";
+    return verdict(phase, closed ? 9 : 8, closed ? "ring_closed" : "opening_wall");
+  }
+
+  return {
+    phase,
+    score: null,
+    ok: null,
+    punish: false,
+    deferOllama: true,
+    reason: "layout",
+  };
+}

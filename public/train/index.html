@@ -22,30 +22,117 @@
         <span id="run-badge" class="badge idle">очікує</span>
         <button id="btn-start" class="primary" type="button">Старт</button>
         <button id="btn-stop" class="ghost" type="button" disabled>Стоп</button>
+        <button id="btn-reset-weights" class="ghost danger" type="button">Скинути ваги</button>
       </div>
     </header>
 
-    <p id="command" class="command">python scripts/train-rl-ollama.py</p>
+    <p id="command" class="command" title="Натисни, щоб змінити параметри">python scripts/train-rl-ollama.py</p>
 
-    <details class="panel config">
-      <summary>Параметри запуску (та сама команда, що в терміналі)</summary>
-      <form id="cfg" class="cfg-grid">
-        <label>timesteps <input name="timesteps" type="number" value="1000000" /></label>
-        <label>n-envs <input name="nEnvs" type="number" value="1" min="1" /></label>
-        <label>n-steps <input name="nSteps" type="number" value="256" /></label>
-        <label>batch-size <input name="batchSize" type="number" value="64" /></label>
-        <label>learning-rate <input name="learningRate" type="number" step="0.0001" value="0.0003" /></label>
-        <label>ticks <input name="ticks" type="number" value="10" /></label>
-        <label>max-steps <input name="maxSteps" type="number" value="500" /></label>
-        <label>ollama-freq <input name="ollamaFreq" type="number" value="1" min="1" /></label>
-        <label>ollama-host <input name="ollamaHost" type="text" value="localhost" /></label>
-        <label>ollama-port <input name="ollamaPort" type="number" value="11434" /></label>
-        <label class="wide">ollama-model <input name="ollamaModel" type="text" value="gemma4:e4b" /></label>
-        <label class="check"><input name="useOllama" type="checkbox" checked /> --use-ollama</label>
-        <label class="check"><input name="noEval" type="checkbox" checked /> --no-eval</label>
-        <label class="check"><input name="resume" type="checkbox" /> --resume</label>
+    <dialog id="start-modal" class="start-modal">
+      <form id="cfg" class="start-modal-card">
+        <header>
+          <p class="eyebrow">MaskablePPO · L1</p>
+          <h2>Параметри перед стартом</h2>
+          <p class="start-modal-lead">Навчання не стартує, поки не натиснеш «Запустити». Прапорці ті самі, що підуть у термінал.</p>
+        </header>
+
+        <div class="cfg-groups">
+          <fieldset>
+            <legend>PPO</legend>
+            <div class="cfg-field">
+              <label>--timesteps <input name="timesteps" type="number" min="1" value="1000000" /></label>
+              <p>Скільки кроків зібрати за цей запуск. 1 крок = 1 дія моделі, не одне оновлення ваг.</p>
+            </div>
+            <div class="cfg-field">
+              <label>--n-envs <input name="nEnvs" type="number" min="1" value="1" /></label>
+              <p>Паралельні світи. 1 = один gym worker. Більше — швидший збір, більше CPU/RAM.</p>
+            </div>
+            <div class="cfg-field">
+              <label>--n-steps <input name="nSteps" type="number" min="1" value="256" /></label>
+              <p>Довжина ролауту PPO. Стільки кроків — потім одне оновлення політики.</p>
+            </div>
+            <div class="cfg-field">
+              <label>--batch-size <input name="batchSize" type="number" min="1" value="64" /></label>
+              <p>Розмір мінібатча SGD всередині оновлення. Має ділити ролаут.</p>
+            </div>
+            <div class="cfg-field">
+              <label>--learning-rate <input name="learningRate" type="number" min="0" step="0.0001" value="0.0003" /></label>
+              <p>Крок Adam. 0.0003 типово для PPO: швидше — скаче, повільніше — стабільніше.</p>
+            </div>
+            <div class="cfg-field check">
+              <label><input name="noEval" type="checkbox" checked /> --no-eval</label>
+              <p>Без окремого eval-світу. Чекпоінти все одно пишуться кожні 10k кроків.</p>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Світ</legend>
+            <div class="cfg-field">
+              <label>--ticks <input name="ticks" type="number" min="0" value="10" /></label>
+              <p>Тіки симуляції після виконаної дії. У design-gym майже не впливає на нагороду.</p>
+            </div>
+            <div class="cfg-field">
+              <label>--max-steps <input name="maxSteps" type="number" min="1" value="500" /></label>
+              <p>Ліміт кроків епізоду. Потім reset: знову порожня цитадель.</p>
+            </div>
+            <div class="cfg-field">
+              <label>--seed <input name="seed" type="text" value="none" /></label>
+              <p>Прототип інтер’єру. <code>none</code> = лише цитадель, compact curriculum.</p>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Ollama</legend>
+            <div class="cfg-field check">
+              <label><input name="useOllama" type="checkbox" /> --use-ollama</label>
+              <p>Питати LLM оцінку кроку. Без галочки — лише локальний teacher. Для L1 curriculum краще вимкнути.</p>
+            </div>
+            <div class="cfg-field">
+              <label>--ollama-freq <input name="ollamaFreq" type="number" min="1" value="1" /></label>
+              <p>Кожну N-ту виконану дію. 1 = кожен крок (повільно, якщо Ollama увімкнена).</p>
+            </div>
+            <div class="cfg-field">
+              <label>--ollama-host <input name="ollamaHost" type="text" value="localhost" /></label>
+              <p>Хост Ollama. <code>localhost</code> = ця машина, не віддалений GPU.</p>
+            </div>
+            <div class="cfg-field">
+              <label>--ollama-port <input name="ollamaPort" type="number" min="1" value="11434" /></label>
+              <p>Порт Ollama API (зазвичай 11434).</p>
+            </div>
+            <div class="cfg-field wide">
+              <label>--ollama-model <input name="ollamaModel" type="text" value="gemma4:e4b" /></label>
+              <p>Completion-модель, не embedding. Використовується лише з --use-ollama.</p>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Ваги</legend>
+            <div class="cfg-field check">
+              <label><input name="resume" type="checkbox" checked /> --resume</label>
+              <p>Продовжити <code>latest.zip</code>. Зніми галочку або натисни «Скинути ваги» — нова мережа.</p>
+            </div>
+            <div class="cfg-field static">
+              <span>--output</span>
+              <code>models/rl_agent/L1</code>
+              <p>Куди пишуться latest.zip і чекпоінти. Resume шукає тут само.</p>
+            </div>
+            <div class="cfg-field static">
+              <span>--dash</span>
+              <code>http://127.0.0.1:8787</code>
+              <p>Дашборд для метрик і історії кроків. Підставляється автоматично.</p>
+            </div>
+          </fieldset>
+        </div>
+
+        <p id="modal-command" class="command modal-command"></p>
+        <p id="start-error" class="start-error" hidden></p>
+
+        <footer>
+          <button id="btn-cancel-start" class="ghost" type="button">Скасувати</button>
+          <button id="btn-confirm-start" class="primary" type="submit">Запустити</button>
+        </footer>
       </form>
-    </details>
+    </dialog>
 
     <section id="kpis" class="kpis"></section>
     <section id="stuck" class="stuck" hidden></section>
@@ -54,34 +141,23 @@
       <article class="variant" id="card-prev">
         <header>
           <div>
-            <p class="eyebrow">Попередній варіант</p>
-            <h2 id="prev-title">ще немає оцінки Ollama</h2>
+            <p class="eyebrow">Останній оцінений крок</p>
+            <h2 id="prev-title">ще немає оцінки</h2>
           </div>
           <div id="prev-score" class="score idle">—</div>
         </header>
         <canvas id="prev-canvas" width="640" height="420"></canvas>
         <div id="prev-meta" class="meta"></div>
       </article>
-      <article class="variant current" id="card-curr">
-        <header>
-          <div>
-            <p class="eyebrow">Поточна пропозиція мережі</p>
-            <h2 id="curr-title">очікує перший крок</h2>
-          </div>
-          <div id="curr-score" class="score idle">—</div>
-        </header>
-        <canvas id="curr-canvas" width="640" height="420"></canvas>
-        <div id="curr-meta" class="meta"></div>
-      </article>
     </section>
 
     <section class="charts">
       <figure>
-        <figcaption>Reward кроку</figcaption>
+        <figcaption id="cap-reward">Reward кроку</figcaption>
         <canvas id="ch-reward"></canvas>
       </figure>
       <figure>
-        <figcaption>Utility форту</figcaption>
+        <figcaption>Utility форту · лінія — макс. за 1000 епізодів (скид з нуля)</figcaption>
         <canvas id="ch-utility"></canvas>
       </figure>
       <figure>

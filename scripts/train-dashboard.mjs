@@ -92,9 +92,11 @@ function buildArgs(cfg = {}) {
   flag("--ollama-host", cfg.ollamaHost, "localhost");
   flag("--ollama-port", cfg.ollamaPort, 11434);
   flag("--ollama-model", cfg.ollamaModel, "gemma4:e4b");
+  flag("--seed", cfg.seed, "none");
   if (cfg.noEval !== false) args.push("--no-eval");
-  if (cfg.useOllama !== false) args.push("--use-ollama");
-  if (cfg.resume) args.push("--resume");
+  if (cfg.useOllama) args.push("--use-ollama");
+  if (cfg.resume !== false) args.push("--resume");
+  else args.push("--no-resume");
   args.push("--output", "models/rl_agent/L1");
   args.push("--dash", `http://${HOST}:${PORT}`);
   return args;
@@ -103,6 +105,70 @@ function buildArgs(cfg = {}) {
 function commandPreview(cfg) {
   const py = "python";
   return [py, ...buildArgs(cfg).map((a) => (/\s/.test(a) ? `"${a}"` : a))].join(" ");
+}
+
+const LAUNCH_CFG_PATH = path.join(root, "data", "train-launch.json");
+const LAUNCH_KEYS = [
+  "timesteps",
+  "nEnvs",
+  "nSteps",
+  "batchSize",
+  "learningRate",
+  "ticks",
+  "maxSteps",
+  "ollamaFreq",
+  "ollamaHost",
+  "ollamaPort",
+  "ollamaModel",
+  "seed",
+  "useOllama",
+  "noEval",
+  "resume",
+];
+
+function factoryLaunchCfg() {
+  return {
+    timesteps: 1_000_000,
+    nEnvs: 1,
+    nSteps: 256,
+    batchSize: 64,
+    learningRate: 3e-4,
+    ticks: 10,
+    maxSteps: 500,
+    ollamaFreq: 1,
+    ollamaHost: process.env.OLLAMA_HOST || "localhost",
+    ollamaPort: Number(process.env.OLLAMA_PORT || 11434),
+    ollamaModel: process.env.OLLAMA_MODEL || "gemma4:e4b",
+    seed: process.env.SETTLEMENT_GYM_SEED || "none",
+    useOllama: false,
+    noEval: true,
+    resume: true,
+  };
+}
+
+function pickLaunchCfg(raw = {}) {
+  const out = {};
+  for (const key of LAUNCH_KEYS) {
+    if (raw[key] === undefined) continue;
+    out[key] = raw[key];
+  }
+  return out;
+}
+
+function loadLaunchCfg() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(LAUNCH_CFG_PATH, "utf8"));
+    return { ...factoryLaunchCfg(), ...pickLaunchCfg(raw), saved: true };
+  } catch {
+    return { ...factoryLaunchCfg(), saved: false };
+  }
+}
+
+function saveLaunchCfg(cfg = {}) {
+  const next = { ...factoryLaunchCfg(), ...pickLaunchCfg(loadLaunchCfg()), ...pickLaunchCfg(cfg) };
+  fs.mkdirSync(path.dirname(LAUNCH_CFG_PATH), { recursive: true });
+  fs.writeFileSync(LAUNCH_CFG_PATH, JSON.stringify(next, null, 2));
+  return { ...next, saved: true };
 }
 
 function stopTraining() {
@@ -126,8 +192,27 @@ function stopTraining() {
   return { ok: true, stopping: true, pid };
 }
 
+const L1_DIR = path.join(root, "models", "rl_agent", "L1");
+
+function resetWeights() {
+  if (child) return { ok: false, error: "спочатку зупиніть навчання" };
+  const existed = fs.existsSync(L1_DIR);
+  if (existed) fs.rmSync(L1_DIR, { recursive: true, force: true });
+  fs.mkdirSync(L1_DIR, { recursive: true });
+  ingest({
+    type: "log",
+    level: "warn",
+    text: existed
+      ? "скинуто ваги L1 · models/rl_agent/L1 видалено · наступний Старт з нуля"
+      : "ваг L1 не було · каталог порожній · наступний Старт з нуля",
+    ts: Date.now(),
+  });
+  return { ok: true, dir: "models/rl_agent/L1" };
+}
+
 function startTraining(cfg = {}) {
   if (child) return { ok: false, error: "training already running" };
+  saveLaunchCfg(cfg);
   const python = resolvePython();
   const args = buildArgs(cfg);
   const command = [python, ...args].join(" ");
@@ -204,22 +289,13 @@ app.get("/api/state", (_req, res) => {
 });
 
 app.get("/api/defaults", (_req, res) => {
-  const cfg = {
-    timesteps: 1_000_000,
-    nEnvs: 1,
-    nSteps: 256,
-    batchSize: 64,
-    learningRate: 3e-4,
-    ticks: 10,
-    maxSteps: 500,
-    useOllama: true,
-    ollamaFreq: 1,
-    ollamaHost: process.env.OLLAMA_HOST || "localhost",
-    ollamaPort: Number(process.env.OLLAMA_PORT || 11434),
-    ollamaModel: process.env.OLLAMA_MODEL || "gemma4:e4b",
-    noEval: true,
-  };
+  const cfg = loadLaunchCfg();
   res.json({ ...cfg, command: commandPreview(cfg) });
+});
+
+app.post("/api/defaults", (req, res) => {
+  const cfg = saveLaunchCfg(req.body || {});
+  res.json({ ok: true, ...cfg, command: commandPreview(cfg) });
 });
 
 app.post("/api/events", (req, res) => {
@@ -233,6 +309,10 @@ app.post("/api/train/start", (req, res) => {
 
 app.post("/api/train/stop", (_req, res) => {
   res.json(stopTraining());
+});
+
+app.post("/api/train/reset-weights", (_req, res) => {
+  res.json(resetWeights());
 });
 
 app.get("/api/ollama/health", async (req, res) => {

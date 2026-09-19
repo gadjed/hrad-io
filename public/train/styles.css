@@ -82,6 +82,11 @@ button.primary:disabled {
   cursor: default;
 }
 
+button.danger {
+  color: #e7b4a8;
+  border-color: #6a3b32;
+}
+
 .badge {
   font-size: 12px;
   padding: 6px 10px;
@@ -104,6 +109,7 @@ button.primary:disabled {
   font-size: 12px;
   overflow-x: auto;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .panel {
@@ -113,42 +119,147 @@ button.primary:disabled {
   border-radius: 10px;
 }
 
-.config { margin-bottom: 14px; }
-.config summary {
-  cursor: pointer;
-  color: var(--gold-2);
+.start-modal {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  max-width: 780px;
+  width: calc(100vw - 32px);
+  color: inherit;
+}
+
+.start-modal::backdrop {
+  background: rgba(6, 8, 6, 0.78);
+}
+
+.start-modal-card {
+  margin: 0;
+  border: 1px solid var(--line);
+  background: #141a16;
+  border-radius: 14px;
+  padding: 18px 18px 14px;
+  max-height: min(88vh, 920px);
+  overflow: auto;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.start-modal-card header {
+  margin-bottom: 14px;
+}
+
+.start-modal-card h2 {
+  font-size: 20px;
+  margin-bottom: 6px;
+}
+
+.start-modal-lead {
+  margin: 0;
+  color: var(--muted);
   font-size: 13px;
+  line-height: 1.4;
 }
 
-.cfg-grid {
+.cfg-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cfg-groups fieldset {
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid rgba(215, 176, 86, 0.22);
+  border-radius: 10px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 10px 12px;
-  margin-top: 12px;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
 }
 
-.cfg-grid label {
+.cfg-groups legend {
+  padding: 0 6px;
+  color: var(--gold-2);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cfg-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 11px;
-  color: var(--muted);
+  min-width: 0;
 }
 
-.cfg-grid input {
+.cfg-field.wide,
+.cfg-field.check,
+.cfg-field.static {
+  grid-column: 1 / -1;
+}
+
+.cfg-field label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--gold-2);
+}
+
+.cfg-field.check label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.cfg-field input {
   background: #0c100e;
   border: 1px solid var(--line);
   color: var(--ink);
   padding: 6px 8px;
   border-radius: 6px;
+  font: inherit;
 }
 
-.cfg-grid .wide { grid-column: span 2; }
-.cfg-grid .check {
-  flex-direction: row;
-  align-items: center;
+.cfg-field p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.cfg-field code {
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.cfg-field.static span {
+  font-size: 12px;
+  color: var(--gold-2);
+}
+
+.modal-command {
+  margin: 12px 0 8px;
+  white-space: pre-wrap;
+  cursor: default;
+}
+
+.start-error {
+  margin: 0 0 8px;
+  color: var(--bad);
+  font-size: 13px;
+}
+
+.start-modal-card footer {
+  display: flex;
+  justify-content: flex-end;
   gap: 8px;
-  padding-top: 18px;
+  position: sticky;
+  bottom: 0;
+  padding-top: 10px;
+  background: linear-gradient(to top, #141a16 70%, rgba(20, 26, 22, 0));
+}
+
+@media (max-width: 720px) {
+  .cfg-groups fieldset { grid-template-columns: 1fr; }
 }
 
 .kpis {
@@ -188,7 +299,7 @@ button.primary:disabled {
 
 .variants {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 720px);
   gap: 12px;
   margin-bottom: 14px;
 }
@@ -204,7 +315,6 @@ button.primary:disabled {
   flex-direction: column;
 }
 
-.variant.current { box-shadow: inset 0 0 0 1px rgba(215, 176, 86, 0.25); }
 .variant.evaluating { box-shadow: inset 0 0 0 1px rgba(240, 212, 138, 0.7); }
 
 .variant header {
@@ -289,6 +399,11 @@ button.primary:disabled {
   margin-bottom: 4px;
 }
 
+.charts figcaption b {
+  color: var(--gold-2);
+  font-weight: 650;
+}
+
 .charts canvas {
   width: 100%;
   height: 130px;
@@ -331,12 +446,42 @@ button.primary:disabled {
   grid-template-columns: 52px 1fr auto;
   gap: 8px;
   font-size: 12px;
-  padding: 4px 0;
+  padding: 5px 8px;
   border-bottom: 1px solid rgba(215, 176, 86, 0.12);
+  border-left: 3px solid transparent;
+  border-radius: 4px;
   color: var(--muted);
 }
 
 .history b { color: var(--ink); font-weight: 600; }
+
+.history li.ok {
+  color: var(--ok);
+  background: rgba(123, 237, 159, 0.1);
+  border-left-color: var(--ok);
+}
+.history li.ok b { color: var(--ok); }
+
+.history li.bad {
+  color: var(--bad);
+  background: rgba(255, 107, 107, 0.1);
+  border-left-color: var(--bad);
+}
+.history li.bad b { color: var(--bad); }
+
+.history li.mid {
+  color: var(--gold-2);
+  background: rgba(215, 176, 86, 0.1);
+  border-left-color: var(--gold);
+}
+.history li.mid b { color: var(--gold-2); }
+
+.history li.good {
+  color: var(--ok);
+  background: rgba(123, 237, 159, 0.1);
+  border-left-color: var(--ok);
+}
+.history li.good b { color: var(--ok); }
 
 .logs {
   margin: 0;

@@ -8,7 +8,12 @@ import {
   sellValue,
 } from "../shared/defs.mjs";
 import { settlementPlannerObservation } from "./SettlementSnapshot.mjs";
-import { contourPlaceReason, enclosureLevel, isContourTile, layoutQuality, protectionScore } from "./LayoutQuality.mjs";
+import {
+  contourPlaceReason,
+  enclosureLevel,
+  isContourTile,
+  layoutQuality,
+} from "./LayoutQuality.mjs";
 
 export const OBS_DIM = 29;
 export const ACTION_COUNT = 20;
@@ -683,47 +688,12 @@ export function encodeKeepGrid(obs) {
 
 export function actionMask(world, settlementId) {
   const mask = new Array(ACTION_COUNT).fill(false);
-  mask[0] = true;
   for (let i = 1; i < ACTION_COUNT; i++) {
     mask[i] = !!parameterizeAction(world, settlementId, i);
   }
-  if (world._designGym) applyOpeningCurriculum(world, settlementId, mask);
+  if (!world._designGym) mask[0] = true;
+  if (!mask.some(Boolean)) mask[0] = true;
   return mask;
-}
-
-function applyOpeningCurriculum(world, settlementId, mask) {
-  const buildings = world.buildingsOf(settlementId);
-  const has = (type) => buildings.some((b) => b.type === type);
-  const hasTower = buildings.some((b) => BUILDINGS[b.type]?.turret);
-  const packed = buildings.map((b) => ({
-    type: b.type,
-    tx: b.tx,
-    ty: b.ty,
-    w: b.w,
-    h: b.h,
-    level: b.level || 1,
-  }));
-  const core = world.factionCore(settlementId);
-  const keep = core ? world.keepForCore(core) : null;
-  if (protectionScore({ buildings: packed, keep }) >= 1) return;
-
-  const allowed = new Set([0, 1]);
-  if (has("mill")) allowed.add(2);
-  if (has("quarry")) allowed.add(3);
-  if (has("goldmine")) {
-    allowed.add(6);
-    allowed.add(7);
-  }
-  if (hasTower) {
-    allowed.add(4);
-    allowed.add(5);
-    allowed.add(8);
-    allowed.add(18);
-    allowed.add(19);
-  }
-  for (let i = 0; i < mask.length; i++) {
-    if (!allowed.has(i)) mask[i] = false;
-  }
 }
 
 export function sellFactionBuilding(world, settlementId, buildingId) {
@@ -892,15 +862,28 @@ export function utilityBreakdown(obs) {
   const E = designLike
     ? 28 * diversity + 3 * Math.min(harvestCount, 6)
     : (t.gold || 0) * 3 + (t.stone || 0) * 1.5 + (t.wood || 0) + 8 * (cov.wood + cov.stone + 1.4 * cov.gold);
+  const enclosed = core && enclosureLevel(obs, core) >= 1 ? 1 : 0;
   const D = designLike
-    ? 6 * towers + 4 * spikes + 8 * gates
+    ? 48 * enclosed +
+      (enclosed ? 24 * (ring.integrity || 0) : 0) +
+      36 * Math.min(towers, 1) +
+      8 * Math.max(0, Math.min(towers, 2) - 1) +
+      5 * Math.min(gates, 1) -
+      14 * Math.max(0, gates - 1) -
+      10 * (enclosed ? Math.max(0, spikes - 6) : spikes)
     : 40 * (ring.integrity || 0) + 8 * towers + 4 * spikes + 6 * gates;
   const coreRatio = core?.max_hp ? core.hp / core.max_hp : 0;
   const wallHp = meanHp(walls.map((b) => ({ hp: b.hp, maxHp: b.max_hp })));
   const S = 50 * coreRatio + (designLike ? 0 : 12 * Math.min((t.gold || 0) / CORE.respawnGold, 1)) + 20 * wallHp;
   const keep = obs.keep;
   const keepTiles = keep ? Math.max(1, (keep.tx1 - keep.tx + 1) * (keep.ty1 - keep.ty + 1)) : 1;
-  const F = (designLike ? 6 : 30) * Math.min(used / keepTiles, 1);
+  const valuable = buildings.filter((b) => {
+    const tpe = b.type;
+    return tpe === "core" || BUILDINGS[tpe]?.harvest || BUILDINGS[tpe]?.turret;
+  }).length;
+  const F = designLike
+    ? 8 * Math.min(valuable / 6, 1)
+    : 30 * Math.min(used / keepTiles, 1);
   const W =
     (designLike ? 0 : 15 * harvestZero) +
     (designLike ? 0 : 8 * ((ring.integrity || 0) < 0.5 ? 1 : 0)) +

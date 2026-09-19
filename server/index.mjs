@@ -301,7 +301,6 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 await store.init();
-ensureWorld();
 
 httpServer.listen(PORT, () => {
   console.log(`Hrad.io → http://localhost:${PORT}`);

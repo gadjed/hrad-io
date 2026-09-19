@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import urllib.error
@@ -131,7 +132,8 @@ class SettlementPlannerEnv(gym.Env):
         intent = np.asarray(msg.get("mask") or [True] * ACTION_COUNT, dtype=bool)
         if intent.shape != (ACTION_COUNT,):
             intent = np.ones(ACTION_COUNT, dtype=bool)
-        intent[0] = True
+        if not intent.any():
+            intent[0] = True
         cells = np.asarray(msg.get("cellMask") or [True] * CELL_COUNT, dtype=bool)
         if cells.shape != (CELL_COUNT,):
             cells = np.ones(CELL_COUNT, dtype=bool)
@@ -334,6 +336,7 @@ def worker_env_from_args(args, rank=0):
         "SETTLEMENT_GYM_ENV_ID": rank,
         "SETTLEMENT_GYM_DESIGN": "0" if args.no_design else "1",
         "SETTLEMENT_GYM_INFINITE_TREASURY": "0" if args.no_infinite else "1",
+        "SETTLEMENT_GYM_SEED": args.seed or "",
         "OLLAMA_HOST": args.ollama_host,
         "OLLAMA_PORT": args.ollama_port,
         "OLLAMA_MODEL": args.ollama_model,
@@ -373,7 +376,18 @@ def parse_args(argv=None):
         default=None,
         help="POST live events to training dashboard (default URL if flag has no value)",
     )
-    parser.add_argument("--resume", action="store_true", help="Load latest.zip / newest checkpoint")
+    parser.add_argument(
+        "--resume",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Load latest.zip / newest checkpoint (default). --no-resume starts from scratch",
+    )
+    parser.add_argument(
+        "--seed",
+        type=str,
+        default=os.environ.get("SETTLEMENT_GYM_SEED", "none"),
+        help="Sandbox prototype to stamp as interior seed. none = core only (compact curriculum)",
+    )
     parser.add_argument("--no-design", action="store_true", help="Old env: stamped prototypes + nodes")
     parser.add_argument("--no-infinite", action="store_true", help="Charge building costs in gym")
     return parser.parse_args(argv)
@@ -526,6 +540,10 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    def _on_stop(*_):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _on_stop)
     try:
         main()
     except KeyboardInterrupt:

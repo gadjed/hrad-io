@@ -46,7 +46,13 @@ const els = {
   run: $("run-badge"),
   start: $("btn-start"),
   stop: $("btn-stop"),
+  resetWeights: $("btn-reset-weights"),
   command: $("command"),
+  modal: $("start-modal"),
+  modalCmd: $("modal-command"),
+  startError: $("start-error"),
+  cancelStart: $("btn-cancel-start"),
+  confirmStart: $("btn-confirm-start"),
   form: $("cfg"),
   kpis: $("kpis"),
   stuck: $("stuck"),
@@ -54,14 +60,10 @@ const els = {
   prevScore: $("prev-score"),
   prevCanvas: $("prev-canvas"),
   prevMeta: $("prev-meta"),
-  currTitle: $("curr-title"),
-  currScore: $("curr-score"),
-  currCanvas: $("curr-canvas"),
-  currMeta: $("curr-meta"),
-  cardCurr: $("card-curr"),
   actions: $("actions"),
   history: $("history"),
   logs: $("logs"),
+  capReward: $("cap-reward"),
   charts: {
     reward: $("ch-reward"),
     utility: $("ch-utility"),
@@ -98,27 +100,95 @@ function cfgFromForm() {
     ollamaHost: String(fd.get("ollamaHost") || "localhost"),
     ollamaPort: num("ollamaPort", 11434),
     ollamaModel: String(fd.get("ollamaModel") || "gemma4:e4b"),
+    seed: String(fd.get("seed") || "none"),
     useOllama: els.form.elements.useOllama.checked,
     noEval: els.form.elements.noEval.checked,
-    resume: !!(els.form.elements.resume && els.form.elements.resume.checked),
+    resume: !els.form.elements.resume || els.form.elements.resume.checked,
   };
 }
 
 function formatCmd(cfg) {
   const parts = [
     "python scripts/train-rl-ollama.py",
-    `--n-envs ${cfg.nEnvs}`,
     `--timesteps ${cfg.timesteps}`,
+    `--n-envs ${cfg.nEnvs}`,
     `--n-steps ${cfg.nSteps}`,
+    `--batch-size ${cfg.batchSize}`,
+    `--learning-rate ${cfg.learningRate}`,
+    `--ticks ${cfg.ticks}`,
+    `--max-steps ${cfg.maxSteps}`,
+    `--ollama-freq ${cfg.ollamaFreq}`,
+    `--ollama-host ${cfg.ollamaHost}`,
+    `--ollama-port ${cfg.ollamaPort}`,
+    `--ollama-model ${cfg.ollamaModel}`,
   ];
   if (cfg.noEval) parts.push("--no-eval");
-  if (cfg.useOllama) {
-    parts.push("--use-ollama", `--ollama-freq ${cfg.ollamaFreq}`, `--ollama-model ${cfg.ollamaModel}`);
-  }
+  if (cfg.useOllama) parts.push("--use-ollama");
+  if (cfg.seed) parts.push(`--seed ${cfg.seed}`);
   if (cfg.resume) parts.push("--resume");
+  else parts.push("--no-resume");
   parts.push("--output models/rl_agent/L1");
-  parts.push("--dash");
+  parts.push("--dash http://127.0.0.1:8787");
   return parts.join(" ");
+}
+
+function refreshCmd() {
+  const cmd = formatCmd(cfgFromForm());
+  if (!state.running || !state.command) els.command.textContent = cmd;
+  if (els.modalCmd) els.modalCmd.textContent = cmd;
+  return cmd;
+}
+
+function applyCfg(cfg) {
+  if (!cfg || !els.form) return;
+  for (const [k, v] of Object.entries(cfg)) {
+    const el = els.form.elements[k];
+    if (!el) continue;
+    if (el.type === "checkbox") el.checked = !!v;
+    else el.value = v;
+  }
+}
+
+const LAUNCH_CFG_KEY = "hrad-train-launch";
+
+function loadLocalCfg() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LAUNCH_CFG_KEY) || "null");
+    return raw && typeof raw === "object" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalCfg() {
+  localStorage.setItem(LAUNCH_CFG_KEY, JSON.stringify(cfgFromForm()));
+}
+
+let persistTimer = 0;
+function persistCfg() {
+  saveLocalCfg();
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    fetch("/api/defaults", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfgFromForm()),
+    }).catch(() => {});
+  }, 250);
+}
+
+function openStartModal() {
+  if (state.running) return;
+  if (els.startError) {
+    els.startError.hidden = true;
+    els.startError.textContent = "";
+  }
+  refreshCmd();
+  els.modal.showModal();
+}
+
+function closeStartModal() {
+  if (els.modal.open) els.modal.close();
 }
 
 function schedule() {
@@ -280,14 +350,25 @@ function drawChart(canvas, seriesList, opts = {}) {
   ctx.fillRect(0, 0, w, h);
 
   const all = seriesList.flatMap((s) => s.points);
+  const hlines = [];
+  if (opts.hline != null && Number.isFinite(Number(opts.hline))) {
+    hlines.push({
+      y: Number(opts.hline),
+      color: opts.hlineColor || "#f0d48a",
+      label: opts.hlineLabel || "",
+    });
+  }
+  for (const extra of opts.hlines || []) {
+    if (extra && Number.isFinite(Number(extra.y))) hlines.push(extra);
+  }
   if (!all.length) {
     ctx.fillStyle = "#b7aa8e";
     ctx.font = "11px Figtree, sans-serif";
     ctx.fillText(opts.empty || "немає точок", 8, 18);
     return;
   }
-  let minY = Math.min(...all.map((p) => p.y));
-  let maxY = Math.max(...all.map((p) => p.y));
+  let minY = Math.min(...all.map((p) => p.y), ...hlines.map((h) => h.y));
+  let maxY = Math.max(...all.map((p) => p.y), ...hlines.map((h) => h.y));
   if (minY === maxY) {
     minY -= 1;
     maxY += 1;
@@ -329,6 +410,28 @@ function drawChart(canvas, seriesList, opts = {}) {
       else ctx.lineTo(x, y);
     });
     ctx.stroke();
+  }
+
+  for (const line of hlines) {
+    const y = 4 + (1 - (line.y - minY) / (maxY - minY)) * plotH;
+    ctx.save();
+    ctx.strokeStyle = line.color || "#f0d48a";
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(left + plotW, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const label = line.label || "";
+    if (label) {
+      ctx.font = "10px Figtree, sans-serif";
+      ctx.fillStyle = line.color || "#f0d48a";
+      ctx.textAlign = "right";
+      ctx.fillText(label, left + plotW - 1, Math.max(11, y - 3));
+      ctx.textAlign = "left";
+    }
+    ctx.restore();
   }
 
   if (opts.legend) {
@@ -431,15 +534,15 @@ function metaHtml(proposal, extra = "") {
     .join("");
 }
 
-function renderVariant(kind, proposal) {
-  const title = kind === "prev" ? els.prevTitle : els.currTitle;
-  const scoreEl = kind === "prev" ? els.prevScore : els.currScore;
-  const canvas = kind === "prev" ? els.prevCanvas : els.currCanvas;
-  const meta = kind === "prev" ? els.prevMeta : els.currMeta;
+function renderEvaluated(proposal) {
+  const title = els.prevTitle;
+  const scoreEl = els.prevScore;
+  const canvas = els.prevCanvas;
+  const meta = els.prevMeta;
   drawFort(canvas, proposal);
 
   if (!proposal) {
-    title.textContent = kind === "prev" ? "ще немає оцінки Ollama" : "очікує перший крок";
+    title.textContent = "ще немає оцінки";
     scoreEl.className = "score idle";
     scoreEl.textContent = "—";
     meta.innerHTML = "<div>Немає даних</div>";
@@ -448,24 +551,19 @@ function renderVariant(kind, proposal) {
 
   title.textContent = `${actionLabel(proposal.actionName)} · ${buildingName(proposal.decision?.action?.type) || proposal.decision?.action?.op || ""}`.trim();
 
-  if (kind === "curr" && (state.evaluating || proposal.ollamaPending) && !proposal.ollama) {
-    const elapsed = state.evaluateStartedAt ? Math.max(0, Date.now() - state.evaluateStartedAt) : 0;
-    scoreEl.className = "score wait";
-    scoreEl.textContent = `Ollama ${Math.round(elapsed / 100) / 10}с`;
-    meta.innerHTML = metaHtml(proposal, `Валідація на Ollama (${state.ollamaStats.model || "модель"})… Поки дивіться попередній варіант.`);
-    return;
-  }
-
   const score = proposal.ollama?.score;
   if (score != null) {
     scoreEl.className = `score ${scoreClass(score)}`;
     scoreEl.textContent =
-      proposal.ollama?.model === "rule" || proposal.ruleFail || proposal.ollama?.ruleFail
+      proposal.ollama?.model === "rule" ||
+      proposal.ollama?.model === "opening_rule" ||
+      proposal.ruleFail ||
+      proposal.ollama?.ruleFail
         ? `правило ${fmt(score, 0)}`
         : fmt(score, 1);
   } else {
     scoreEl.className = "score idle";
-    scoreEl.textContent = kind === "prev" ? "—" : "без Ollama";
+    scoreEl.textContent = "—";
   }
   meta.innerHTML = metaHtml(proposal);
 }
@@ -483,6 +581,8 @@ function render() {
       : "навчання";
   els.start.disabled = state.running;
   els.stop.disabled = !state.running;
+  if (els.resetWeights) els.resetWeights.disabled = state.running;
+  if (state.running && els.modal?.open) closeStartModal();
   if (state.command) els.command.textContent = state.command;
 
   const v = state.values || {};
@@ -499,7 +599,7 @@ function render() {
   els.kpis.innerHTML = [
     kpi("gym-кроки", `${fmtInt(gymNow)} / ${fmtInt(state.totalTimesteps)}`),
     kpi("PPO оновлення", ppoLabel),
-    kpi("Ollama перевірки", `${fmtInt(ollama.ok)} ок / ${fmtInt(ollama.scores)}`),
+    kpi("перевірки (правило/Ollama)", `${fmtInt(ollama.ok)} ок / ${fmtInt(ollama.scores)}`),
     kpi("останні 100", last100.length ? `${Math.round((ok100 / last100.length) * 100)}% ок` : "—"),
     kpi("fail streak", fmtInt(ollama.failStreak)),
     kpi("скид до core", fmtInt(ollama.resetsToCore)),
@@ -533,12 +633,25 @@ function render() {
     els.stuck.innerHTML = "";
   }
 
-  els.cardCurr.classList.toggle("evaluating", evaluating);
-  renderVariant("prev", state.previous);
-  renderVariant("curr", state.current);
+  renderEvaluated(state.previous);
+
+  if (els.capReward) {
+    const n = state.okStreakMax1000;
+    els.capReward.innerHTML =
+      n == null
+        ? "Reward кроку"
+        : `Reward кроку · макс. серія <b>${fmtInt(n)}</b>`;
+  }
 
   drawChart(els.charts.reward, [{ points: state.series.reward, color: "#d7b056" }]);
-  drawChart(els.charts.utility, [{ points: state.series.utility, color: "#7bed9f" }]);
+  drawChart(els.charts.utility, [{ points: state.series.utility, color: "#7bed9f" }], {
+    hline: state.utilityMax1000,
+    hlineColor: "#f0d48a",
+    hlineLabel:
+      state.utilityMax1000 == null
+        ? ""
+        : `макс. ${fmt(state.utilityMax1000, 0)} · ${fmtInt((state.episodePeaks?.length || 0) + (state.episodeUtilityPeak != null ? 1 : 0))} еп.`,
+  });
   drawChart(els.charts.ollama, [{ points: state.series.ollama, color: "#70a1ff" }]);
   drawPie(els.charts.ollamaPie, ok100, bad100);
   drawChart(els.charts.ollamaOk, [{ points: state.series.ollamaOk || [], color: "#7bed9f" }]);
@@ -573,7 +686,8 @@ function render() {
   els.history.innerHTML = state.history
     .map((row) => {
       const score = row.score == null ? "…" : fmt(row.score, 1);
-      return `<li><span>#${row.id}</span><b>${actionLabel(row.actionName)}</b><span>${score} · U ${fmt(row.utility, 0)}</span></li>`;
+      const tone = row.ok === true ? "ok" : row.ok === false ? "bad" : row.score == null ? "idle" : scoreClass(row.score);
+      return `<li class="${tone}"><span>#${row.id}</span><b>${actionLabel(row.actionName)}</b><span>${score} · U ${fmt(row.utility, 0)}</span></li>`;
     })
     .join("");
 
@@ -626,25 +740,79 @@ function connect() {
 }
 
 els.form.addEventListener("input", () => {
-  els.command.textContent = formatCmd(cfgFromForm());
+  refreshCmd();
+  persistCfg();
 });
 
-els.start.addEventListener("click", async () => {
-  els.start.disabled = true;
-  const res = await fetch("/api/train/start", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(cfgFromForm()),
-  });
-  const data = await res.json();
-  if (!data.ok) {
-    els.start.disabled = false;
-    alert(data.error || "не вдалося стартувати");
+els.form.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (state.running) return;
+  persistCfg();
+  els.confirmStart.disabled = true;
+  if (els.startError) {
+    els.startError.hidden = true;
+    els.startError.textContent = "";
   }
+  try {
+    const res = await fetch("/api/train/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfgFromForm()),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      if (els.startError) {
+        els.startError.hidden = false;
+        els.startError.textContent = data.error || "не вдалося стартувати";
+      } else {
+        alert(data.error || "не вдалося стартувати");
+      }
+      return;
+    }
+    closeStartModal();
+  } catch (err) {
+    if (els.startError) {
+      els.startError.hidden = false;
+      els.startError.textContent = err.message || "немає зв'язку з дашбордом";
+    }
+  } finally {
+    els.confirmStart.disabled = false;
+  }
+});
+
+els.start.addEventListener("click", openStartModal);
+els.command.addEventListener("click", () => {
+  if (!state.running) openStartModal();
+});
+els.cancelStart.addEventListener("click", closeStartModal);
+els.modal.addEventListener("click", (ev) => {
+  if (ev.target === els.modal) closeStartModal();
 });
 
 els.stop.addEventListener("click", async () => {
   await fetch("/api/train/stop", { method: "POST" });
+});
+
+els.resetWeights.addEventListener("click", async () => {
+  if (state.running) {
+    alert("Спочатку Стоп.");
+    return;
+  }
+  if (!confirm("Видалити чекпоінти L1 і почати з випадкових ваг? Це нескасовно.")) return;
+  els.resetWeights.disabled = true;
+  try {
+    const res = await fetch("/api/train/reset-weights", { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) {
+      alert(data.error || "не вдалося скинути ваги");
+      return;
+    }
+    if (els.form.elements.resume) els.form.elements.resume.checked = false;
+    refreshCmd();
+    persistCfg();
+  } finally {
+    els.resetWeights.disabled = state.running;
+  }
 });
 
 fetch("/api/state")
@@ -652,20 +820,25 @@ fetch("/api/state")
   .then(applyRemoteState)
   .catch(() => {});
 
+{
+  const local = loadLocalCfg();
+  if (local) applyCfg(local);
+  refreshCmd();
+}
+
 fetch("/api/defaults")
   .then((r) => r.json())
   .then((cfg) => {
-    if (state.running) return;
-    for (const [k, v] of Object.entries(cfg)) {
-      const el = els.form.elements[k];
-      if (!el) continue;
-      if (el.type === "checkbox") el.checked = !!v;
-      else el.value = v;
-    }
-    els.command.textContent = formatCmd(cfgFromForm());
+    const local = loadLocalCfg();
+    if (cfg.saved) applyCfg(cfg);
+    else if (local) applyCfg(local);
+    else applyCfg(cfg);
+    refreshCmd();
   })
   .catch(() => {
-    els.command.textContent = formatCmd(cfgFromForm());
+    const local = loadLocalCfg();
+    if (local) applyCfg(local);
+    refreshCmd();
   });
 
 connect();

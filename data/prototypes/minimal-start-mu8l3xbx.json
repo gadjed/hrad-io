@@ -1,0 +1,215 @@
+{
+  "id": "minimal-start-mu8l3xbx",
+  "name": "minimal_start",
+  "createdAt": "2026-09-19T16:11:04.701Z",
+  "updatedAt": "2026-09-19T16:11:04.701Z",
+  "origin": {
+    "tx": 76,
+    "ty": 78
+  },
+  "buildings": [
+    {
+      "type": "core",
+      "tx": 0,
+      "ty": 0,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "mill",
+      "tx": -1,
+      "ty": 2,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "quarry",
+      "tx": 1,
+      "ty": 2,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "goldmine",
+      "tx": -2,
+      "ty": 0,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "tower_arrow",
+      "tx": 2,
+      "ty": 0,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": -3,
+      "ty": 2,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": -2,
+      "ty": 2,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": -2,
+      "ty": 3,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": -2,
+      "ty": 4,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": -1,
+      "ty": 4,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 0,
+      "ty": 4,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 1,
+      "ty": 4,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 2,
+      "ty": 4,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 3,
+      "ty": 4,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 3,
+      "ty": 3,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 3,
+      "ty": 2,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 4,
+      "ty": 2,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 4,
+      "ty": 1,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 4,
+      "ty": 0,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 4,
+      "ty": -1,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 3,
+      "ty": -1,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 2,
+      "ty": -1,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": 0,
+      "ty": -1,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": -1,
+      "ty": -1,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": -2,
+      "ty": -1,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": -3,
+      "ty": -1,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": -3,
+      "ty": 0,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "wall_wood",
+      "tx": -3,
+      "ty": 1,
+      "rot": 0,
+      "level": 1
+    },
+    {
+      "type": "gate",
+      "tx": 1,
+      "ty": -1,
+      "rot": 1,
+      "level": 1
+    }
+  ]
+}

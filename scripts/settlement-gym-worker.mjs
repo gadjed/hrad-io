@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { PrototypeStore } from "../server/PrototypeStore.mjs";
 import { World } from "../server/World.mjs";
 import { OllamaEvaluator } from "../server/OllamaEvaluator.mjs";
+import { openingPhase, scoreLayoutDecision } from "../server/LayoutQuality.mjs";
 import {
   ACTION_COUNT,
   ACTION_NAMES,
@@ -27,6 +28,19 @@ import {
   pickNpcSettlement,
   utilityBreakdown,
 } from "../server/SettlementPlanner.mjs";
+
+const PHASE_BONUS = {
+  opening_mill: 0.2,
+  opening_quarry: 0.35,
+  opening_goldmine: 0.5,
+  opening_tower: 0.55,
+  opening_wall: 0.2,
+  ring_closed: 0.85,
+};
+
+function harvestLocked(obs) {
+  return openingPhase(obs) !== "need_mill";
+}
 
 function envInt(name, fallback) {
   const n = Number(process.env[name]);
@@ -51,6 +65,7 @@ const ENV_ID = String(process.env.SETTLEMENT_GYM_ENV_ID || "0");
 const DASH_URL = String(process.env.TRAIN_DASH_URL || "").replace(/\/$/, "");
 const DESIGN = envFlagDefault("SETTLEMENT_GYM_DESIGN", true);
 const INFINITE = envFlagDefault("SETTLEMENT_GYM_INFINITE_TREASURY", true);
+const SEED_NAME = String(process.env.SETTLEMENT_GYM_SEED || "").trim();
 const OLLAMA_OK = 7;
 const OLLAMA_SAMPLE_EVERY = envInt("SETTLEMENT_GYM_OLLAMA_SAMPLE", 10);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -62,6 +77,17 @@ function send(obj) {
 
 function log(...args) {
   console.error("[gym-worker]", ...args);
+}
+
+function findSeedPrototype(store, name) {
+  if (!name || name === "none" || name === "off") return null;
+  const all = store.all();
+  return (
+    all.find((p) => p.name === name) ||
+    all.find((p) => p.id === name) ||
+    all.find((p) => p.id.startsWith(name) || p.name.startsWith(name)) ||
+    null
+  );
 }
 
 function appendOllamaSample(record) {
@@ -160,12 +186,14 @@ class GymSession {
     this.stepCount = 0;
     this.episode = 0;
     this.episodeReward = 0;
+    this.episodePeakUtility = 0;
     this.prevUtility = 0;
     this.proposalId = 0;
     this.gymSteps = 0;
     this.failStreak = 0;
     this.sellStreak = 0;
     this.ollamaCalls = 0;
+    this.seedProto = null;
     this.ollama = USE_OLLAMA
       ? new OllamaEvaluator({
           host: process.env.OLLAMA_HOST || "localhost",
@@ -178,7 +206,10 @@ class GymSession {
   async init() {
     this.store = new PrototypeStore();
     await this.store.init();
-    log(`ready · ticks=${TICKS} max_steps=${MAX_STEPS} ollama=${USE_OLLAMA ? "on" : "off"} design=${DESIGN ? "on" : "off"}`);
+    this.seedProto = findSeedPrototype(this.store, SEED_NAME);
+    log(
+      `ready · ticks=${TICKS} max_steps=${MAX_STEPS} ollama=${USE_OLLAMA ? "on" : "off"} design=${DESIGN ? "on" : "off"} seed=${this.seedProto ? this.seedProto.name : "none"}`
+    );
     void dashEmit({
       type: "worker_ready",
       actions: ACTION_NAMES,
@@ -189,6 +220,7 @@ class GymSession {
       model: this.ollama?.model || null,
       keepN: KEEP_N,
       gridCh: GRID_CH,
+      seed: this.seedProto?.name || null,
       twoHead: true,
     });
   }
@@ -208,6 +240,27 @@ class GymSession {
     return world;
   }
 
+  applySeed() {
+    if (!this.seedProto || !this.world || !this.settlementId) return 0;
+    return this.world.stampLayoutSeed(this.settlementId, this.seedProto);
+  }
+
+  revertToSeed() {
+    if (!this.world || !this.settlementId) return;
+    if (this.seedProto) this.world.restoreLayoutSeed(this.settlementId, this.seedProto);
+    else this.world.stripSettlementToCore(this.settlementId);
+  }
+
+  /** After mill+quarry+goldmine, keep them — wiping recycles the harvest reward. */
+  stripOnFail(obs, reason) {
+    if (harvestLocked(obs)) return false;
+    this.revertToSeed();
+    this.failStreak = 0;
+    this.sellStreak = 0;
+    void dashEmit({ type: "reset_to_core", reason, episode: this.episode, step: this.stepCount });
+    return true;
+  }
+
   snapshot() {
     const packed = observe(this.world, this.settlementId);
     return {
@@ -220,12 +273,21 @@ class GymSession {
     };
   }
 
+  noteEpisodePeak(utility) {
+    const n = Number(utility);
+    if (!Number.isFinite(n)) return;
+    if (!Number.isFinite(this.episodePeakUtility) || n > this.episodePeakUtility) {
+      this.episodePeakUtility = n;
+    }
+  }
+
   async reset() {
     this.world = await this.freshWorld();
     this.settlementId = pickNpcSettlement(this.world);
     if (!this.settlementId) {
       throw new Error("no NPC settlement after generate()");
     }
+    this.applySeed();
     this.stepCount = 0;
     this.episode += 1;
     this.episodeReward = 0;
@@ -233,6 +295,7 @@ class GymSession {
     this.sellStreak = 0;
     const snap = this.snapshot();
     this.prevUtility = snap.utility;
+    this.episodePeakUtility = snap.utility;
     const breakdown = compactBreakdown(utilityBreakdown(snap.observation));
     void dashEmit({
       type: "episode",
@@ -268,6 +331,7 @@ class GymSession {
     }
 
     const useCell = cellIndex != null && Number.isInteger(Number(cellIndex));
+    const before = this.snapshot();
     const decision = (
       useCell
         ? parameterizeActionAt(this.world, this.settlementId, idx, Number(cellIndex))
@@ -279,41 +343,63 @@ class GymSession {
       utility_estimate: 0,
       rationale: "invalid masked as wait",
     };
-    const executed = executeDecision(this.world, this.settlementId, decision);
     const illegal = decision.illegal || null;
-    const isWait = !illegal && (idx === 0 || (decision.action?.op || "wait") === "wait");
+    const isWait = !illegal && idx === 0 && (decision.action?.op || "wait") === "wait";
 
-    if (!isWait && !DESIGN) {
+    let teacher = !illegal ? scoreLayoutDecision(before.observation, decision, before.observation) : null;
+    const skipApply = !!(illegal || teacher?.punish);
+    const executed = skipApply ? false : executeDecision(this.world, this.settlementId, decision);
+
+    if (!isWait && !DESIGN && executed) {
       for (let i = 0; i < TICKS; i++) this.world.step();
     }
     this.stepCount++;
     this.gymSteps += 1;
 
-    const snap = this.snapshot();
+    let snap = this.snapshot();
+    this.noteEpisodePeak(snap.utility);
+    if (executed && teacher?.reason === "opening_wall") {
+      teacher = scoreLayoutDecision(before.observation, decision, snap.observation);
+    }
     const coreGone = !this.world.factionCore(this.settlementId);
     const truncated = this.stepCount >= MAX_STEPS;
     const done = coreGone;
-    const breakdown = compactBreakdown(utilityBreakdown(snap.observation));
 
-    const rewardGame = clipReward((snap.utility - this.prevUtility) / 80);
+    let rewardGame = clipReward((snap.utility - this.prevUtility) / 80);
     let reward = rewardGame;
     if (illegal) reward = clipReward(-0.7);
     else if (!executed && idx !== 0) reward = clipReward(reward - (useCell ? 0.08 : 0.02));
-    this.prevUtility = snap.utility;
 
     if (executed && decision.action?.op === "sell") this.sellStreak += 1;
     else if (executed && decision.action?.op === "place") this.sellStreak = 0;
 
     let stripped = false;
     if (this.sellStreak >= 3) {
-      this.world.stripSettlementToCore(this.settlementId);
+      this.revertToSeed();
       this.sellStreak = 0;
       this.failStreak = 0;
       stripped = true;
+      snap = this.snapshot();
       void dashEmit({ type: "reset_to_core", reason: "sell_streak", episode: this.episode, step: this.stepCount });
     }
 
-    const ollamaDue = !!(!illegal && !isWait && executed && this.ollama && this.stepCount % OLLAMA_FREQ === 0);
+    const ollamaDue = !!(
+      teacher?.deferOllama &&
+      this.ollama &&
+      this.stepCount % OLLAMA_FREQ === 0
+    );
+
+    if (teacher?.punish) {
+      rewardGame = clipReward(-0.7);
+      reward = rewardGame;
+    } else if (teacher && !teacher.deferOllama) {
+      const ollamaReward = (teacher.score - 5) / 5;
+      const bonus = PHASE_BONUS[teacher.reason] || 0;
+      reward = clipReward(0.7 * rewardGame + 0.3 * ollamaReward + bonus);
+    }
+
+    this.prevUtility = snap.utility;
+    const breakdown = compactBreakdown(utilityBreakdown(snap.observation));
     const proposalId = ++this.proposalId;
     const actionName = ACTION_NAMES[idx];
     const legal = [];
@@ -345,20 +431,16 @@ class GymSession {
       },
       viz: packViz(snap.observation, decision),
       ollamaPending: ollamaDue,
-      ollamaIn: this.ollama ? (OLLAMA_FREQ - (this.stepCount % OLLAMA_FREQ)) % OLLAMA_FREQ : null,
+      ollamaIn: ollamaDue ? 0 : null,
       skippedWait: isWait,
       ruleFail: illegal,
     };
     void dashEmit(proposal);
 
     if (illegal) {
-      this.failStreak += 1;
+      if (executed) this.failStreak += 1;
       if (this.failStreak >= 3) {
-        this.world.stripSettlementToCore(this.settlementId);
-        this.failStreak = 0;
-        this.sellStreak = 0;
-        stripped = true;
-        void dashEmit({ type: "reset_to_core", reason: illegal, episode: this.episode, step: this.stepCount });
+        stripped = this.stripOnFail(before.observation, illegal);
       }
       await dashEmit({
         type: "ollama_done",
@@ -378,6 +460,33 @@ class GymSession {
         resetToCore: stripped,
         ruleFail: illegal,
       });
+    } else if (teacher && !teacher.deferOllama) {
+      const score = teacher.score;
+      const ok = teacher.ok;
+      const ollamaReward = (score - 5) / 5;
+      if (ok) this.failStreak = 0;
+      else if (teacher.punish && executed) this.failStreak += 1;
+      if (this.failStreak >= 3) {
+        stripped = this.stripOnFail(before.observation, teacher.reason || "opening_fail_streak");
+      }
+      await dashEmit({
+        type: "ollama_done",
+        proposalId,
+        actionName,
+        score,
+        ok,
+        raw: teacher.reason,
+        ms: 0,
+        cached: false,
+        error: null,
+        model: "opening_rule",
+        reward,
+        rewardGame,
+        ollamaReward,
+        failStreak: this.failStreak,
+        resetToCore: stripped,
+        phase: teacher.phase,
+      });
     } else if (ollamaDue) {
       await dashEmit({
         type: "ollama_start",
@@ -387,18 +496,14 @@ class GymSession {
         episode: this.episode,
         step: this.stepCount,
       });
-      const ev = await this.ollama.evaluateDetailed(snap.observation, decision);
+      const ev = await this.ollama.evaluateDetailed(before.observation, decision, snap.observation);
       const ok = ev.score > OLLAMA_OK;
       const ollamaReward = (ev.score - 5) / 5;
       reward = clipReward(0.7 * reward + 0.3 * ollamaReward);
       if (ok) this.failStreak = 0;
-      else this.failStreak += 1;
+      else if (ev.score <= 3 && executed) this.failStreak += 1;
       if (this.failStreak >= 3) {
-        this.world.stripSettlementToCore(this.settlementId);
-        this.failStreak = 0;
-        this.sellStreak = 0;
-        stripped = true;
-        void dashEmit({ type: "reset_to_core", reason: "ollama_fail_streak", episode: this.episode, step: this.stepCount });
+        stripped = this.stripOnFail(before.observation, "ollama_fail_streak");
       }
       if (!ev.cached) {
         this.ollamaCalls += 1;
@@ -420,8 +525,17 @@ class GymSession {
             error: ev.error,
             prompt: ev.prompt || "",
             response: ev.raw || "",
+            phase: teacher?.phase || null,
             decision: decision.action || null,
             rationale: decision.rationale || "",
+            buildingsBefore: (before.observation.buildings || []).map((b) => ({
+              type: b.type,
+              tx: b.tx,
+              ty: b.ty,
+              w: b.w,
+              h: b.h,
+              level: b.level,
+            })),
             buildings: (snap.observation.buildings || []).map((b) => ({
               type: b.type,
               tx: b.tx,
@@ -449,6 +563,7 @@ class GymSession {
         ollamaReward,
         failStreak: this.failStreak,
         resetToCore: stripped,
+        phase: teacher?.phase || null,
       });
     }
 
@@ -470,6 +585,7 @@ class GymSession {
         steps: this.stepCount,
         reward: this.episodeReward,
         utility: snap.utility,
+        peakUtility: this.episodePeakUtility,
         reason: done ? "core_lost" : "truncated",
       });
     }

@@ -24,6 +24,7 @@ export const DEFAULT_ACTION_NAMES = [
 const SERIES_MAX = 400;
 const LOG_MAX = 280;
 const HISTORY_MAX = 24;
+const EPISODE_PEAK_MAX = 1000;
 
 export function createTrainState() {
   return {
@@ -100,6 +101,14 @@ export function createTrainState() {
     episodes: 0,
     lastEpisodeReward: null,
     lastEpisodeReason: null,
+    episodeUtilityPeak: null,
+    episodePeaks: [],
+    utilityMax1000: null,
+    lastCommittedEpisode: null,
+    episodeOkStreak: 0,
+    episodeOkStreakPeak: 0,
+    okStreakPeaks: [],
+    okStreakMax1000: null,
   };
 }
 
@@ -107,6 +116,79 @@ function pushSeries(arr, x, y, max = SERIES_MAX) {
   if (!Number.isFinite(y)) return;
   arr.push({ x, y });
   if (arr.length > max) arr.splice(0, arr.length - max);
+}
+
+function refreshUtilityMax1000(state) {
+  let max = null;
+  for (const y of state.episodePeaks || []) {
+    if (max == null || y > max) max = y;
+  }
+  if (state.episodeUtilityPeak != null && (max == null || state.episodeUtilityPeak > max)) {
+    max = state.episodeUtilityPeak;
+  }
+  state.utilityMax1000 = max;
+}
+
+function refreshOkStreakMax1000(state) {
+  let max = null;
+  for (const y of state.okStreakPeaks || []) {
+    if (max == null || y > max) max = y;
+  }
+  const cur = state.episodeOkStreakPeak || 0;
+  if (cur > 0 && (max == null || cur > max)) max = cur;
+  state.okStreakMax1000 = max;
+}
+
+function noteOkStreak(state, ok) {
+  if (ok) {
+    state.episodeOkStreak = (state.episodeOkStreak || 0) + 1;
+    if (state.episodeOkStreak > (state.episodeOkStreakPeak || 0)) {
+      state.episodeOkStreakPeak = state.episodeOkStreak;
+    }
+  } else {
+    state.episodeOkStreak = 0;
+  }
+  refreshOkStreakMax1000(state);
+}
+
+function touchEpisodeUtility(state, utility) {
+  const u = num(utility);
+  if (u == null) return;
+  if (state.episodeUtilityPeak == null || u > state.episodeUtilityPeak) {
+    state.episodeUtilityPeak = u;
+  }
+  refreshUtilityMax1000(state);
+}
+
+function commitEpisodePeak(state, fallback, episode, extra = {}) {
+  const ep = Number(episode);
+  if (Number.isFinite(ep) && state.lastCommittedEpisode === ep) {
+    refreshUtilityMax1000(state);
+    refreshOkStreakMax1000(state);
+    return;
+  }
+  const peak = state.episodeUtilityPeak ?? num(fallback);
+  state.episodeUtilityPeak = null;
+  if (peak != null) {
+    if (!state.episodePeaks) state.episodePeaks = [];
+    state.episodePeaks.push(peak);
+    if (state.episodePeaks.length > EPISODE_PEAK_MAX) {
+      state.episodePeaks.splice(0, state.episodePeaks.length - EPISODE_PEAK_MAX);
+    }
+  }
+  const streakPeak = Math.max(state.episodeOkStreakPeak || 0, num(extra.peakOkStreak) || 0);
+  state.episodeOkStreak = 0;
+  state.episodeOkStreakPeak = 0;
+  if (streakPeak > 0) {
+    if (!state.okStreakPeaks) state.okStreakPeaks = [];
+    state.okStreakPeaks.push(streakPeak);
+    if (state.okStreakPeaks.length > EPISODE_PEAK_MAX) {
+      state.okStreakPeaks.splice(0, state.okStreakPeaks.length - EPISODE_PEAK_MAX);
+    }
+  }
+  if (Number.isFinite(ep) && (peak != null || streakPeak > 0)) state.lastCommittedEpisode = ep;
+  refreshUtilityMax1000(state);
+  refreshOkStreakMax1000(state);
 }
 
 function num(value) {
@@ -171,7 +253,11 @@ export function applyTrainEvent(state, ev) {
       break;
     }
     case "episode": {
-      state.episodes = ev.episode || state.episodes;
+      const next = ev.episode || state.episodes;
+      if (next !== state.episodes && (state.episodeUtilityPeak != null || (state.episodeOkStreakPeak || 0) > 0)) {
+        commitEpisodePeak(state, null, state.episodes);
+      }
+      state.episodes = next;
       state.episodeViz = ev;
       break;
     }
@@ -181,6 +267,7 @@ export function applyTrainEvent(state, ev) {
       const y = num(ev.reward);
       const x = state.gymSteps || state.stepIndex || ev.steps || 0;
       if (y != null) pushSeries(state.series.epRew, x, y);
+      commitEpisodePeak(state, ev.peakUtility ?? ev.utility, ev.episode, { peakOkStreak: ev.peakOkStreak });
       break;
     }
     case "proposal": {
@@ -193,6 +280,7 @@ export function applyTrainEvent(state, ev) {
       state.actionCounts[name] = (state.actionCounts[name] || 0) + 1;
       pushSeries(state.series.reward, state.stepIndex, num(ev.reward));
       pushSeries(state.series.utility, state.stepIndex, num(ev.utility));
+      touchEpisodeUtility(state, ev.utility);
       if (ev.ollamaPending) {
         state.evaluating = true;
         state.evaluateStartedAt = ev.ts || Date.now();
@@ -224,6 +312,7 @@ export function applyTrainEvent(state, ev) {
       state.evaluating = false;
       state.ollamaStats.scores += 1;
       const ok = ev.ok === true || (ev.ok !== false && num(ev.score) != null && ev.score > 7);
+      noteOkStreak(state, ok);
       if (ok) state.ollamaStats.ok += 1;
       else state.ollamaStats.bad += 1;
       if (ev.error) state.ollamaStats.errors += 1;
@@ -260,6 +349,7 @@ export function applyTrainEvent(state, ev) {
     case "reset_to_core": {
       state.ollamaStats.resetsToCore += 1;
       state.ollamaStats.failStreak = 0;
+      state.episodeOkStreak = 0;
       break;
     }
     case "metrics":
