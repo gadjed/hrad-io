@@ -8,7 +8,9 @@
     "start": "node server/index.mjs",
     "dev": "node --watch server/index.mjs",
     "world:gen": "node scripts/generate-settlements.mjs",
-    "world:regen": "node scripts/regen-world.mjs"
+    "world:regen": "node scripts/regen-world.mjs",
+    "planner:snapshots": "node scripts/export-settlement-snapshots.mjs --load --steps 50 --interval 5 --with-labels --truncate",
+    "planner:validate": "node scripts/validate-settlement-planner.mjs data/training/snapshots.jsonl"
   },
   "engines": {
     "node": ">=18"

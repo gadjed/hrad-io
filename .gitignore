@@ -1,6 +1,11 @@
 node_modules/
 .DS_Store
+.env
 data/world.sqlite
 data/world.sqlite-wal
 data/world.sqlite-shm
+data/training/
+models/
+venv/
+__pycache__/
 

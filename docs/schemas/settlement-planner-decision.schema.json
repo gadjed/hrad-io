@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://io.games/schemas/settlement-planner-decision.schema.json",
+  "title": "SettlementPlannerDecision",
+  "description": "Output decision from the settlement development planner (io.games).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "action", "utility_estimate", "rationale"],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": ["survive", "economy", "fortify", "expand", "upgrade", "wait"]
+    },
+    "action": { "$ref": "#/$defs/action" },
+    "queue": {
+      "type": "array",
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/queuedAction" }
+    },
+    "utility_estimate": { "type": "number" },
+    "rationale": { "type": "string", "maxLength": 512 }
+  },
+  "$defs": {
+    "buildingType": {
+      "type": "string",
+      "enum": [
+        "core",
+        "wall_wood",
+        "wall_stone",
+        "gate",
+        "mill",
+        "quarry",
+        "goldmine",
+        "tower_arrow",
+        "tower_cannon",
+        "spikes"
+      ]
+    },
+    "op": {
+      "type": "string",
+      "enum": ["place", "upgrade", "sell", "repair", "wait"]
+    },
+    "rot": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "building_id", "type", "tx", "ty", "rot"],
+      "properties": {
+        "op": { "$ref": "#/$defs/op" },
+        "building_id": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] },
+        "type": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/buildingType" }]
+        },
+        "tx": { "oneOf": [{ "type": "null" }, { "type": "integer" }] },
+        "ty": { "oneOf": [{ "type": "null" }, { "type": "integer" }] },
+        "rot": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/rot" }]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "op": { "const": "place" } }, "required": ["op"] },
+          "then": {
+            "required": ["type", "tx", "ty"],
+            "properties": {
+              "building_id": { "type": "null" },
+              "type": { "$ref": "#/$defs/buildingType" },
+              "tx": { "type": "integer" },
+              "ty": { "type": "integer" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "op": { "enum": ["upgrade", "sell", "repair"] } },
+            "required": ["op"]
+          },
+          "then": {
+            "required": ["building_id"],
+            "properties": {
+              "building_id": { "type": "string", "minLength": 1 },
+              "type": { "type": "null" },
+              "tx": { "type": "null" },
+              "ty": { "type": "null" },
+              "rot": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "op": { "const": "wait" } }, "required": ["op"] },
+          "then": {
+            "properties": {
+              "building_id": { "type": "null" },
+              "type": { "type": "null" },
+              "tx": { "type": "null" },
+              "ty": { "type": "null" },
+              "rot": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+    "queuedAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op"],
+      "properties": {
+        "op": { "$ref": "#/$defs/op" },
+        "building_id": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "type": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/buildingType" }] },
+        "tx": { "oneOf": [{ "type": "null" }, { "type": "integer" }] },
+        "ty": { "oneOf": [{ "type": "null" }, { "type": "integer" }] },
+        "rot": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/rot" }] }
+      }
+    }
+  }
+}

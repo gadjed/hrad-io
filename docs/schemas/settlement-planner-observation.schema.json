@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://io.games/schemas/settlement-planner-observation.schema.json",
+  "title": "SettlementPlannerObservation",
+  "description": "Input observation for the settlement development planner (io.games).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tick",
+    "settlement_id",
+    "core",
+    "keep",
+    "treasury",
+    "threat",
+    "nearby_nodes",
+    "buildings",
+    "ring",
+    "enemies_nearby",
+    "respawn_gold_cost"
+  ],
+  "properties": {
+    "tick": { "type": "integer", "minimum": 0 },
+    "settlement_id": { "type": "string", "minLength": 1 },
+    "core": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "tx", "ty", "level", "hp", "max_hp"],
+          "properties": {
+            "id": { "type": "string" },
+            "tx": { "type": "integer" },
+            "ty": { "type": "integer" },
+            "level": { "type": "integer", "minimum": 1, "maximum": 5 },
+            "hp": { "type": "number", "minimum": 0 },
+            "max_hp": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        }
+      ]
+    },
+    "keep": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tx", "ty", "tx1", "ty1", "level"],
+          "properties": {
+            "tx": { "type": "integer" },
+            "ty": { "type": "integer" },
+            "tx1": { "type": "integer" },
+            "ty1": { "type": "integer" },
+            "level": { "type": "integer", "minimum": 1, "maximum": 5 }
+          }
+        }
+      ]
+    },
+    "treasury": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wood", "stone", "gold"],
+      "properties": {
+        "wood": { "type": "integer", "minimum": 0 },
+        "stone": { "type": "integer", "minimum": 0 },
+        "gold": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "threat": { "type": "number", "minimum": 0, "maximum": 1 },
+    "nearby_nodes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wood", "stone", "gold"],
+      "properties": {
+        "wood": { "type": "integer", "minimum": 0 },
+        "stone": { "type": "integer", "minimum": 0 },
+        "gold": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "buildings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/building" }
+    },
+    "ring": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/ring" }
+      ]
+    },
+    "enemies_nearby": { "type": "boolean" },
+    "respawn_gold_cost": { "type": "integer", "minimum": 0 },
+    "legal_actions_hint": {
+      "type": "object",
+      "description": "Optional compact hints from simulation (affordable types, hole count, etc.)."
+    },
+    "meta": {
+      "type": "object",
+      "description": "Optional training metadata (npc, desire, job); not required for inference.",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "buildingType": {
+      "type": "string",
+      "enum": [
+        "core",
+        "wall_wood",
+        "wall_stone",
+        "gate",
+        "mill",
+        "quarry",
+        "goldmine",
+        "tower_arrow",
+        "tower_cannon",
+        "spikes"
+      ]
+    },
+    "building": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "tx", "ty", "w", "h", "rot", "level", "hp", "max_hp", "coverage"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "$ref": "#/$defs/buildingType" },
+        "tx": { "type": "integer" },
+        "ty": { "type": "integer" },
+        "w": { "type": "integer", "minimum": 1 },
+        "h": { "type": "integer", "minimum": 1 },
+        "rot": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "level": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "hp": { "type": "number", "minimum": 0 },
+        "max_hp": { "type": "number", "exclusiveMinimum": 0 },
+        "coverage": {
+          "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }]
+        }
+      }
+    },
+    "ringCell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tx", "ty", "rot", "gate"],
+      "properties": {
+        "tx": { "type": "integer" },
+        "ty": { "type": "integer" },
+        "rot": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "gate": { "type": "boolean" }
+      }
+    },
+    "ring": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x0", "y0", "x1", "y1", "integrity", "holes", "corners", "can_expand"],
+      "properties": {
+        "x0": { "type": "integer" },
+        "y0": { "type": "integer" },
+        "x1": { "type": "integer" },
+        "y1": { "type": "integer" },
+        "integrity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "holes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ringCell" }
+        },
+        "corners": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tx", "ty"],
+            "properties": {
+              "tx": { "type": "integer" },
+              "ty": { "type": "integer" }
+            }
+          }
+        },
+        "can_expand": { "type": "boolean" }
+      }
+    }
+  }
+}
