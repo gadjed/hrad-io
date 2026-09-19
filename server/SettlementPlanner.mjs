@@ -2,14 +2,20 @@ import {
   BUILDINGS,
   CORE,
   MAX_LEVEL,
+  TILE,
   addResource,
   canAfford,
   sellValue,
 } from "../shared/defs.mjs";
 import { settlementPlannerObservation } from "./SettlementSnapshot.mjs";
+import { contourPlaceReason, enclosureLevel, isContourTile, layoutQuality, protectionScore } from "./LayoutQuality.mjs";
 
 export const OBS_DIM = 29;
 export const ACTION_COUNT = 20;
+/** L1 keep is 18×18 (core 2×2 + pad 8). Grid is clipped to this. */
+export const KEEP_N = 18;
+export const GRID_CH = 6;
+export const CELL_COUNT = KEEP_N * KEEP_N;
 
 export const ACTION_NAMES = [
   "wait",
@@ -116,13 +122,30 @@ function walletOf(f) {
   return f.stock || {};
 }
 
-function canPay(f, cost) {
+function canPay(world, f, cost) {
+  if (world?._infiniteTreasury) return true;
   return canAfford(walletOf(f), cost || {});
+}
+
+function footprintOf(type, tx, ty) {
+  const def = BUILDINGS[type];
+  return { tx, ty, w: def?.w || 1, h: def?.h || 1 };
+}
+
+export function illegalPlaceReason(world, settlementId, type, tx, ty) {
+  if (!type || tx == null || ty == null) return null;
+  const f = factionOf(world, settlementId);
+  const core = f ? world.factionCore(f) : world.factionCore(settlementId);
+  const keep = core ? world.keepForCore(core) : null;
+  return contourPlaceReason(keep, type, footprintOf(type, tx, ty), {
+    contourWallsOnly: !!world?._designGym,
+  });
 }
 
 function canPlace(world, f, type, tx, ty, rot = 0) {
   if (tx == null || ty == null || !BUILDINGS[type]) return false;
-  if (!canPay(f, BUILDINGS[type].cost)) return false;
+  if (!canPay(world, f, BUILDINGS[type].cost)) return false;
+  if (illegalPlaceReason(world, f.id, type, tx, ty)) return false;
   return world.canPlaceTile(type, tx, ty, rot, f.id);
 }
 
@@ -144,7 +167,7 @@ function pickUpgrade(world, f, list) {
   let best = null;
   for (const b of list) {
     if (!b || b.level >= MAX_LEVEL) continue;
-    if (BUILDINGS[b.type]?.harvest && world.countHarvestNodes(b, BUILDINGS[b.type]) <= 0) continue;
+    if (BUILDINGS[b.type]?.harvest && !world._designGym && world.countHarvestNodes(b, BUILDINGS[b.type]) <= 0) continue;
     if (!brain.canUpgrade(f, b)) continue;
     if (!best || b.level < best.level) best = b;
   }
@@ -192,21 +215,52 @@ function pickRedundant(stats) {
   return null;
 }
 
-function holeWallType(f, hole) {
+function holeWallType(world, f, hole) {
   if (hole?.gate) return "gate";
-  if (canPay(f, BUILDINGS.wall_stone.cost)) return "wall_stone";
+  if (canPay(world, f, BUILDINGS.wall_stone.cost)) return "wall_stone";
   return "wall_wood";
 }
 
 function firstPlaceableHole(world, f, holes, typeOverride = null) {
   for (const hole of holes || []) {
-    const type = typeOverride || holeWallType(f, hole);
+    const type = typeOverride || holeWallType(world, f, hole);
     const rot = hole.rot || 0;
     if (canPlace(world, f, type, hole.tx, hole.ty, rot)) {
       return { type, tx: hole.tx, ty: hole.ty, rot };
     }
   }
   return null;
+}
+
+function findLayoutSite(world, f, core, type) {
+  const keep = world.keepForCore(core);
+  const def = BUILDINGS[type];
+  if (!keep || !def) return null;
+  const harvestR = def.harvest ? def.harvest.radius / TILE : 0;
+  let best = null;
+  let bestScore = Infinity;
+  for (let ty = keep.ty; ty <= keep.ty1 - (def.h || 1) + 1; ty++) {
+    for (let tx = keep.tx; tx <= keep.tx1 - (def.w || 1) + 1; tx++) {
+      if (!canPlace(world, f, type, tx, ty, 0)) continue;
+      let overlap = 0;
+      if (harvestR) {
+        const cx = tx + (def.w || 1) / 2;
+        const cy = ty + (def.h || 1) / 2;
+        for (const b of world.buildingsOf(f.id)) {
+          if (b.type !== type) continue;
+          const d = Math.hypot(cx - (b.tx + b.w / 2), cy - (b.ty + b.h / 2));
+          overlap += Math.max(0, 2 * harvestR - d);
+        }
+      }
+      const dist = Math.hypot(tx - core.tx, ty - core.ty);
+      const score = overlap * 80 + dist;
+      if (score < bestScore) {
+        bestScore = score;
+        best = { tx, ty, rot: 0 };
+      }
+    }
+  }
+  return best;
 }
 
 function findCoreSite(world, f) {
@@ -247,18 +301,30 @@ export function parameterizeAction(world, settlementId, actionIndex) {
 
   if (idx === 1 || idx === 2 || idx === 3) {
     const type = HARVEST_TYPES[idx - 1];
-    const site = world.findHarvestSite(f, core, type, stats.ring);
+    let site = world._designGym ? null : world.findHarvestSite(f, core, type, stats.ring);
+    if (!site) site = findLayoutSite(world, f, core, type);
     if (!site || !canPlace(world, f, type, site.tx, site.ty, 0)) return null;
     return placeDecision("economy", type, site.tx, site.ty, 0, `place ${type}`);
   }
 
   if (idx === 4) {
+    if (world._designGym) {
+      const site = findLayoutSite(world, f, core, "wall_stone") || findLayoutSite(world, f, core, "wall_wood");
+      if (!site) return null;
+      const type = canPlace(world, f, "wall_stone", site.tx, site.ty, 0) ? "wall_stone" : "wall_wood";
+      return placeDecision("fortify", type, site.tx, site.ty, 0, "place wall");
+    }
     const hole = firstPlaceableHole(world, f, stats.ring.holes);
     if (!hole) return null;
     return placeDecision("fortify", hole.type, hole.tx, hole.ty, hole.rot, "close ring hole");
   }
 
   if (idx === 5) {
+    if (world._designGym) {
+      const site = findLayoutSite(world, f, core, "gate");
+      if (!site) return null;
+      return placeDecision("fortify", "gate", site.tx, site.ty, 0, "place gate");
+    }
     const gates = (stats.ring.holes || []).filter((h) => h.gate);
     const hole = firstPlaceableHole(world, f, gates.length ? gates : stats.ring.holes, "gate");
     if (!hole) return null;
@@ -267,12 +333,22 @@ export function parameterizeAction(world, settlementId, actionIndex) {
 
   if (idx === 6 || idx === 7) {
     const type = idx === 6 ? "tower_arrow" : "tower_cannon";
+    if (world._designGym) {
+      const site = findLayoutSite(world, f, core, type);
+      if (!site) return null;
+      return placeDecision("fortify", type, site.tx, site.ty, 0, `place ${type}`);
+    }
     const corner = brain.weakestCorner(stats);
     if (!corner || !canPlace(world, f, type, corner.tx, corner.ty, 0)) return null;
     return placeDecision("fortify", type, corner.tx, corner.ty, 0, `place ${type}`);
   }
 
   if (idx === 8) {
+    if (world._designGym) {
+      const site = findLayoutSite(world, f, core, "spikes");
+      if (!site) return null;
+      return placeDecision("fortify", "spikes", site.tx, site.ty, 0, "place spikes");
+    }
     for (const g of stats.gates) {
       if (brain.gateHasSpikes(g, stats.buildings)) continue;
       const spot = brain.spikeSpot(g, core);
@@ -284,6 +360,7 @@ export function parameterizeAction(world, settlementId, actionIndex) {
   }
 
   if (idx === 9) {
+    if (world._designGym) return null;
     const b = pickUpgrade(world, f, [core]);
     if (!b) return null;
     return targetDecision("upgrade", "upgrade", b.id, "upgrade core");
@@ -332,12 +409,18 @@ export function parameterizeAction(world, settlementId, actionIndex) {
   }
 
   if (idx === 18) {
+    if (world._designGym) {
+      const site = findLayoutSite(world, f, core, "wall_stone") || findLayoutSite(world, f, core, "wall_wood");
+      if (!site) return null;
+      const type = canPlace(world, f, "wall_stone", site.tx, site.ty, 0) ? "wall_stone" : "wall_wood";
+      return placeDecision("expand", type, site.tx, site.ty, 0, "expand wall");
+    }
     const next = stats.ring.next;
     if (!next) return null;
     const cell = next.holes[0] || next.cells[0];
     if (!cell) return null;
     const isGate = (next.gates || []).some((g) => g.tx === cell.tx && g.ty === cell.ty);
-    const type = isGate ? "gate" : (canPay(f, BUILDINGS.wall_stone.cost) && (f.stock.stone || 0) >= 24
+    const type = isGate ? "gate" : (canPay(world, f, BUILDINGS.wall_stone.cost) && (world._infiniteTreasury || (f.stock.stone || 0) >= 24)
       ? "wall_stone"
       : "wall_wood");
     if (!canPlace(world, f, type, cell.tx, cell.ty, cell.rot || 0)) return null;
@@ -366,13 +449,281 @@ export function parameterizeAction(world, settlementId, actionIndex) {
   return null;
 }
 
+export function cellToTile(keep, cellIndex) {
+  const i = cellIndex | 0;
+  if (!keep || i < 0 || i >= CELL_COUNT) return null;
+  return {
+    tx: keep.tx + (i % KEEP_N),
+    ty: keep.ty + Math.floor(i / KEEP_N),
+  };
+}
+
+function buildingAtOrigin(world, settlementId, tx, ty) {
+  for (const b of world.buildingsOf(settlementId)) {
+    if (b.tx === tx && b.ty === ty) return b;
+  }
+  return null;
+}
+
+const PLACE_AT = {
+  1: "mill",
+  2: "quarry",
+  3: "goldmine",
+  4: "wall_stone",
+  5: "gate",
+  6: "tower_arrow",
+  7: "tower_cannon",
+  8: "spikes",
+  18: "wall_stone",
+};
+
+/**
+ * Two-head gym: intent + keep cell. Does not search for a site.
+ */
+export function parameterizeActionAt(world, settlementId, actionIndex, cellIndex) {
+  const f = factionOf(world, settlementId);
+  if (!f) return null;
+  const idx = actionIndex | 0;
+  if (idx === 0) return waitDecision("policy wait");
+
+  const core = world.factionCore(f);
+  const keep = core ? world.keepForCore(core) : null;
+  const tile = cellToTile(keep, cellIndex);
+
+  if (idx === 17) {
+    if (core || !tile) return null;
+    if (!canPlace(world, f, "core", tile.tx, tile.ty, 0)) return null;
+    return placeDecision("expand", "core", tile.tx, tile.ty, 0, "place core");
+  }
+  if (!core || !tile) return null;
+
+  const { tx, ty } = tile;
+  const placeType = PLACE_AT[idx];
+  if (placeType) {
+    let type = placeType;
+    if ((idx === 4 || idx === 18) && !canPlace(world, f, "wall_stone", tx, ty, 0)) type = "wall_wood";
+    const illegal = illegalPlaceReason(world, f.id, type, tx, ty);
+    const mode = HARVEST_TYPES.includes(type) ? "economy" : idx === 18 ? "expand" : "fortify";
+    const decision = placeDecision(mode, type, tx, ty, 0, illegal ? `${illegal} ${type} @${tx},${ty}` : `place ${type} @${tx},${ty}`);
+    if (illegal) {
+      decision.illegal = illegal;
+      return decision;
+    }
+    if (!canPlace(world, f, type, tx, ty, 0)) return null;
+    return decision;
+  }
+
+  if (idx === 19) {
+    const wallType = canPlace(world, f, "wall_stone", tx, ty, 0)
+      ? "wall_stone"
+      : canPlace(world, f, "wall_wood", tx, ty, 0)
+        ? "wall_wood"
+        : null;
+    if (wallType) return placeDecision("fortify", wallType, tx, ty, 0, `fortify wall @${tx},${ty}`);
+    const towerIllegal = illegalPlaceReason(world, f.id, "tower_arrow", tx, ty);
+    if (towerIllegal) {
+      const decision = placeDecision("fortify", "tower_arrow", tx, ty, 0, `${towerIllegal} tower @${tx},${ty}`);
+      decision.illegal = towerIllegal;
+      return decision;
+    }
+    if (canPlace(world, f, "tower_arrow", tx, ty, 0)) {
+      return placeDecision("fortify", "tower_arrow", tx, ty, 0, `fortify tower @${tx},${ty}`);
+    }
+  }
+
+  const b = buildingAtOrigin(world, f.id, tx, ty);
+  if (!b) return null;
+
+  if (idx === 9) {
+    if (world._designGym) return null;
+    if (b.type !== "core") return null;
+    const u = pickUpgrade(world, f, [b]);
+    if (!u) return null;
+    return targetDecision("upgrade", "upgrade", u.id, "upgrade core");
+  }
+  if (idx === 10) {
+    if (!HARVEST_TYPES.includes(b.type)) return null;
+    const u = pickUpgrade(world, f, [b]);
+    if (!u) return null;
+    return targetDecision("upgrade", "upgrade", u.id, "upgrade harvest");
+  }
+  if (idx === 11) {
+    if (!BUILDINGS[b.type]?.turret) return null;
+    const u = pickUpgrade(world, f, [b]);
+    if (!u) return null;
+    return targetDecision("upgrade", "upgrade", u.id, "upgrade tower");
+  }
+  if (idx === 12) {
+    if (b.type !== "core") return null;
+    if (!world.brain.canRepair(f, b)) return null;
+    return targetDecision("survive", "repair", b.id, "repair core");
+  }
+  if (idx === 13) {
+    if (b.type === "core") return null;
+    if (!world.brain.canRepair(f, b)) return null;
+    return targetDecision("survive", "repair", b.id, "repair damaged");
+  }
+  if (idx === 14) {
+    if (!HARVEST_TYPES.includes(b.type)) return null;
+    return targetDecision("economy", "sell", b.id, "sell harvest");
+  }
+  if (idx === 15) {
+    if (b.type !== "wall_wood" && b.type !== "wall_stone" && b.type !== "gate") return null;
+    return targetDecision("economy", "sell", b.id, "sell wall");
+  }
+  if (idx === 16) {
+    if (b.type === "core") return null;
+    return targetDecision("economy", "sell", b.id, "sell redundant");
+  }
+  if (idx === 19 && b.type === "wall_wood") {
+    const u = pickUpgrade(world, f, [b]);
+    if (!u) return null;
+    return targetDecision("fortify", "upgrade", u.id, "upgrade wood wall");
+  }
+  return null;
+}
+
+export function cellMask(world, settlementId) {
+  const mask = new Array(CELL_COUNT).fill(false);
+  const f = factionOf(world, settlementId);
+  const core = f ? world.factionCore(f) : null;
+  const keep = core ? world.keepForCore(core) : null;
+  if (!f || !keep) {
+    mask[0] = true;
+    return mask;
+  }
+  for (let i = 0; i < CELL_COUNT; i++) {
+    const tx = keep.tx + (i % KEEP_N);
+    const ty = keep.ty + Math.floor(i / KEEP_N);
+    if (tx > keep.tx1 || ty > keep.ty1) continue;
+    if (world.canPlaceTile("wall_wood", tx, ty, 0, f.id)) {
+      mask[i] = true;
+      continue;
+    }
+    if (buildingAtOrigin(world, f.id, tx, ty)) mask[i] = true;
+  }
+  if (!mask.some(Boolean)) mask[0] = true;
+  return mask;
+}
+
+const GRID_TYPE = {
+  core: 0.14,
+  mill: 0.28,
+  quarry: 0.42,
+  goldmine: 0.56,
+  wall_wood: 0.7,
+  wall_stone: 0.7,
+  gate: 0.72,
+  spikes: 0.78,
+  tower_arrow: 0.86,
+  tower_cannon: 0.86,
+};
+
+export function encodeKeepGrid(obs) {
+  const grid = new Float32Array(GRID_CH * KEEP_N * KEEP_N);
+  const keep = obs.keep;
+  if (!keep) return Array.from(grid);
+  const at = (c, x, y) => c * KEEP_N * KEEP_N + y * KEEP_N + x;
+  const inside = (x, y) => x >= 0 && y >= 0 && x < KEEP_N && y < KEEP_N;
+
+  for (const b of obs.buildings || []) {
+    const enc = enclosureLevel(obs, b) / 2;
+    const w = b.w || 1;
+    const h = b.h || 1;
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) {
+        const x = b.tx + dx - keep.tx;
+        const y = b.ty + dy - keep.ty;
+        if (!inside(x, y)) continue;
+        grid[at(0, x, y)] = GRID_TYPE[b.type] || 1;
+        grid[at(1, x, y)] = clip01((b.level || 1) / MAX_LEVEL);
+        grid[at(2, x, y)] = enc;
+        if (dx === 0 && dy === 0) grid[at(5, x, y)] = 1;
+      }
+    }
+  }
+
+  for (let y = 0; y < KEEP_N; y++) {
+    for (let x = 0; x < KEEP_N; x++) {
+      if (grid[at(0, x, y)] !== 0) continue;
+      const tx = keep.tx + x;
+      const ty = keep.ty + y;
+      grid[at(4, x, y)] = isContourTile(keep, tx, ty) ? 0.4 : 1;
+    }
+  }
+
+  const cover = new Map();
+  for (const b of obs.buildings || []) {
+    const def = BUILDINGS[b.type];
+    if (!def?.harvest) continue;
+    const rad = (def.harvest.radius || 0) / TILE;
+    const cx = b.tx - keep.tx + (b.w || 1) / 2;
+    const cy = b.ty - keep.ty + (b.h || 1) / 2;
+    const r2 = rad * rad;
+    for (let y = 0; y < KEEP_N; y++) {
+      for (let x = 0; x < KEEP_N; x++) {
+        const dx = x + 0.5 - cx;
+        const dy = y + 0.5 - cy;
+        if (dx * dx + dy * dy > r2) continue;
+        const k = `${b.type}:${x},${y}`;
+        cover.set(k, (cover.get(k) || 0) + 1);
+      }
+    }
+  }
+  for (const [k, n] of cover) {
+    if (n < 2) continue;
+    const comma = k.indexOf(":");
+    const xy = k.slice(comma + 1).split(",");
+    const x = Number(xy[0]);
+    const y = Number(xy[1]);
+    grid[at(3, x, y)] = Math.max(grid[at(3, x, y)], clip01((n - 1) / 3));
+  }
+  return Array.from(grid);
+}
+
 export function actionMask(world, settlementId) {
   const mask = new Array(ACTION_COUNT).fill(false);
   mask[0] = true;
   for (let i = 1; i < ACTION_COUNT; i++) {
     mask[i] = !!parameterizeAction(world, settlementId, i);
   }
+  if (world._designGym) applyOpeningCurriculum(world, settlementId, mask);
   return mask;
+}
+
+function applyOpeningCurriculum(world, settlementId, mask) {
+  const buildings = world.buildingsOf(settlementId);
+  const has = (type) => buildings.some((b) => b.type === type);
+  const hasTower = buildings.some((b) => BUILDINGS[b.type]?.turret);
+  const packed = buildings.map((b) => ({
+    type: b.type,
+    tx: b.tx,
+    ty: b.ty,
+    w: b.w,
+    h: b.h,
+    level: b.level || 1,
+  }));
+  const core = world.factionCore(settlementId);
+  const keep = core ? world.keepForCore(core) : null;
+  if (protectionScore({ buildings: packed, keep }) >= 1) return;
+
+  const allowed = new Set([0, 1]);
+  if (has("mill")) allowed.add(2);
+  if (has("quarry")) allowed.add(3);
+  if (has("goldmine")) {
+    allowed.add(6);
+    allowed.add(7);
+  }
+  if (hasTower) {
+    allowed.add(4);
+    allowed.add(5);
+    allowed.add(8);
+    allowed.add(18);
+    allowed.add(19);
+  }
+  for (let i = 0; i < mask.length; i++) {
+    if (!allowed.has(i)) mask[i] = false;
+  }
 }
 
 export function sellFactionBuilding(world, settlementId, buildingId) {
@@ -437,12 +788,19 @@ export function encodeObservation(obs) {
   if (c && c.max_hp) features.push(clip01(c.hp / c.max_hp), clip01((c.level || 1) / MAX_LEVEL));
   else features.push(0, 0);
 
-  features.push(clip01(obs.threat || 0), obs.enemies_nearby ? 1 : 0);
+  const lqFeat = layoutQuality(obs);
+  const buildings = obs.buildings || [];
+  features.push(clip01(obs.threat || 0), clip01((lqFeat.P || 0) / 10));
 
   const n = obs.nearby_nodes || {};
-  features.push(clip01((n.wood || 0) / 20), clip01((n.stone || 0) / 20), clip01((n.gold || 0) / 10));
+  const nodeCount = (n.wood || 0) + (n.stone || 0) + (n.gold || 0);
+  if (nodeCount > 0) {
+    features.push(clip01((n.wood || 0) / 20), clip01((n.stone || 0) / 20), clip01((n.gold || 0) / 10));
+  } else {
+    const has = (type) => buildings.some((b) => b.type === type);
+    features.push(has("mill") ? 1 : 0, has("quarry") ? 1 : 0, has("goldmine") ? 1 : 0);
+  }
 
-  const buildings = obs.buildings || [];
   const count = (type) => buildings.filter((b) => b.type === type).length;
   features.push(
     clip01(count("mill") / 3),
@@ -491,7 +849,7 @@ export function encodeObservation(obs) {
   features.push(clip01(hpAvg));
 
   const waste = buildings.filter((b) => BUILDINGS[b.type]?.harvest && (b.coverage || 0) === 0).length;
-  features.push(clip01(waste / 4));
+  features.push(nodeCount > 0 ? clip01(waste / 4) : clip01((lqFeat.overlap || 0) / 4));
 
   while (features.length < OBS_DIM) features.push(0);
   return features.slice(0, OBS_DIM);
@@ -524,17 +882,33 @@ export function utilityBreakdown(obs) {
     if (b.type === "wall_wood" || b.type === "wall_stone") walls.push(b);
   }
 
-  const E = (t.gold || 0) * 3 + (t.stone || 0) * 1.5 + (t.wood || 0) + 8 * (cov.wood + cov.stone + 1.4 * cov.gold);
-  const D = 40 * (ring.integrity || 0) + 8 * towers + 4 * spikes + 6 * gates;
+  const nodes = obs.nearby_nodes || {};
+  const designLike = ((nodes.wood || 0) + (nodes.stone || 0) + (nodes.gold || 0)) === 0;
+  const hasType = (type) => buildings.some((b) => b.type === type);
+  const diversity = (hasType("mill") ? 1 : 0) + (hasType("quarry") ? 1 : 0) + (hasType("goldmine") ? 1 : 0);
+  const harvestCount = buildings.filter((b) => BUILDINGS[b.type]?.harvest).length;
+  const lq = layoutQuality(obs);
+
+  const E = designLike
+    ? 28 * diversity + 3 * Math.min(harvestCount, 6)
+    : (t.gold || 0) * 3 + (t.stone || 0) * 1.5 + (t.wood || 0) + 8 * (cov.wood + cov.stone + 1.4 * cov.gold);
+  const D = designLike
+    ? 6 * towers + 4 * spikes + 8 * gates
+    : 40 * (ring.integrity || 0) + 8 * towers + 4 * spikes + 6 * gates;
   const coreRatio = core?.max_hp ? core.hp / core.max_hp : 0;
   const wallHp = meanHp(walls.map((b) => ({ hp: b.hp, maxHp: b.max_hp })));
-  const S = 50 * coreRatio + 12 * Math.min((t.gold || 0) / CORE.respawnGold, 1) + 20 * wallHp;
+  const S = 50 * coreRatio + (designLike ? 0 : 12 * Math.min((t.gold || 0) / CORE.respawnGold, 1)) + 20 * wallHp;
   const keep = obs.keep;
   const keepTiles = keep ? Math.max(1, (keep.tx1 - keep.tx + 1) * (keep.ty1 - keep.ty + 1)) : 1;
-  const F = 30 * Math.min(used / keepTiles, 1);
-  const W = 15 * harvestZero + 8 * ((ring.integrity || 0) < 0.5 ? 1 : 0);
-  const U = 1.0 * E + 0.85 * D + 1.2 * S + 0.4 * F - 0.9 * W;
-  return { E, D, S, F, W, U, towers, spikes, gates, harvestZero, used, keepTiles, coreRatio, wallHp, cov };
+  const F = (designLike ? 6 : 30) * Math.min(used / keepTiles, 1);
+  const W =
+    (designLike ? 0 : 15 * harvestZero) +
+    (designLike ? 0 : 8 * ((ring.integrity || 0) < 0.5 ? 1 : 0)) +
+    12 * (lq.overlap || 0) +
+    10 * (lq.clog || 0);
+  const P = 22 * (lq.P || 0);
+  const U = 1.0 * E + 0.85 * D + 1.2 * S + 0.4 * F + P - 0.9 * W;
+  return { E, D, S, F, W, P, overlap: lq.overlap, clog: lq.clog, U, towers, spikes, gates, harvestZero, used, keepTiles, coreRatio, wallHp, cov };
 }
 
 export function calculateUtility(obs) {
@@ -563,7 +937,9 @@ export function observe(world, settlementId) {
   return {
     observation,
     obs: encodeObservation(observation),
+    grid: encodeKeepGrid(observation),
     mask: actionMask(world, settlementId),
+    cellMask: cellMask(world, settlementId),
     utility: calculateUtility(observation),
   };
 }

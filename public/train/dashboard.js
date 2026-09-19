@@ -18,12 +18,6 @@ const BUILD_COLOR = {
   spikes: "#c97a4a",
 };
 
-const NODE_COLOR = {
-  tree: "#6ea35a",
-  rock: "#9aa4b2",
-  goldvein: "#efc94a",
-};
-
 const ACTION_UA = {
   wait: "чекати",
   place_mill: "лісопилка",
@@ -77,6 +71,8 @@ const els = {
     stab: $("ch-stab"),
     gpuUtil: $("ch-gpu-util"),
     gpuTemp: $("ch-gpu-temp"),
+    ollamaPie: $("ch-ollama-pie"),
+    ollamaOk: $("ch-ollama-ok"),
   },
 };
 
@@ -98,12 +94,13 @@ function cfgFromForm() {
     learningRate: num("learningRate", 3e-4),
     ticks: num("ticks", 10),
     maxSteps: num("maxSteps", 500),
-    ollamaFreq: num("ollamaFreq", 10),
+    ollamaFreq: num("ollamaFreq", 1),
     ollamaHost: String(fd.get("ollamaHost") || "localhost"),
     ollamaPort: num("ollamaPort", 11434),
     ollamaModel: String(fd.get("ollamaModel") || "gemma4:e4b"),
     useOllama: els.form.elements.useOllama.checked,
     noEval: els.form.elements.noEval.checked,
+    resume: !!(els.form.elements.resume && els.form.elements.resume.checked),
   };
 }
 
@@ -118,6 +115,8 @@ function formatCmd(cfg) {
   if (cfg.useOllama) {
     parts.push("--use-ollama", `--ollama-freq ${cfg.ollamaFreq}`, `--ollama-model ${cfg.ollamaModel}`);
   }
+  if (cfg.resume) parts.push("--resume");
+  parts.push("--output models/rl_agent/L1");
   parts.push("--dash");
   return parts.join(" ");
 }
@@ -189,16 +188,10 @@ function drawFort(canvas, proposal) {
     add(viz.keep.tx, viz.keep.ty);
     add(viz.keep.tx1, viz.keep.ty1);
   }
-  if (viz.ring) {
-    add(viz.ring.x0, viz.ring.y0);
-    add(viz.ring.x1, viz.ring.y1);
-  }
   for (const b of viz.buildings || []) {
     add(b.tx, b.ty);
     add(b.tx + (b.w || 1), b.ty + (b.h || 1));
   }
-  for (const n of viz.nodes || []) add(n.tx, n.ty);
-  for (const hole of viz.holes || []) add(hole.tx, hole.ty);
   if (viz.highlight?.tx != null) add(viz.highlight.tx, viz.highlight.ty);
   if (!xs.length) {
     add(0, 0);
@@ -239,20 +232,6 @@ function drawFort(canvas, proposal) {
     ctx.lineWidth = 2;
     ctx.fillRect(px(viz.keep.tx), py(viz.keep.ty), (viz.keep.tx1 - viz.keep.tx + 1) * cell, (viz.keep.ty1 - viz.keep.ty + 1) * cell);
     ctx.strokeRect(px(viz.keep.tx), py(viz.keep.ty), (viz.keep.tx1 - viz.keep.tx + 1) * cell, (viz.keep.ty1 - viz.keep.ty + 1) * cell);
-  }
-
-  for (const n of viz.nodes || []) {
-    ctx.fillStyle = NODE_COLOR[n.kind] || "#888";
-    ctx.globalAlpha = 0.55;
-    ctx.beginPath();
-    ctx.arc(px(n.tx) + cell / 2, py(n.ty) + cell / 2, Math.max(2, cell * 0.22), 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-  }
-
-  for (const hole of viz.holes || []) {
-    ctx.strokeStyle = "rgba(196, 69, 60, 0.85)";
-    ctx.strokeRect(px(hole.tx) + 1, py(hole.ty) + 1, cell - 2, cell - 2);
   }
 
   for (const b of viz.buildings || []) {
@@ -304,7 +283,7 @@ function drawChart(canvas, seriesList, opts = {}) {
   if (!all.length) {
     ctx.fillStyle = "#b7aa8e";
     ctx.font = "11px Figtree, sans-serif";
-    ctx.fillText("немає точок", 8, 18);
+    ctx.fillText(opts.empty || "немає точок", 8, 18);
     return;
   }
   let minY = Math.min(...all.map((p) => p.y));
@@ -329,9 +308,19 @@ function drawChart(canvas, seriesList, opts = {}) {
 
   for (const series of seriesList) {
     const pts = series.points;
-    if (pts.length < 2) continue;
+    if (!pts.length) continue;
     ctx.strokeStyle = series.color;
+    ctx.fillStyle = series.color;
     ctx.lineWidth = 1.5;
+    if (pts.length === 1) {
+      const p = pts[0];
+      const x = left + plotW * 0.5;
+      const y = 4 + (1 - (p.y - minY) / (maxY - minY)) * plotH;
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
     ctx.beginPath();
     pts.forEach((p, i) => {
       const x = left + (i / (pts.length - 1)) * plotW;
@@ -355,32 +344,81 @@ function drawChart(canvas, seriesList, opts = {}) {
   }
 }
 
+function drawPie(canvas, ok, bad) {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = canvas.clientWidth || 300;
+  const h = canvas.clientHeight || 130;
+  if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#0c100e";
+  ctx.fillRect(0, 0, w, h);
+  const total = ok + bad;
+  const cx = w * 0.38;
+  const cy = h / 2;
+  const r = Math.min(h * 0.38, w * 0.22);
+  if (!total) {
+    ctx.strokeStyle = "#3a4036";
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#b7aa8e";
+    ctx.font = "11px Figtree, sans-serif";
+    ctx.fillText("немає перевірок", 8, 18);
+    return;
+  }
+  const okAngle = (ok / total) * Math.PI * 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + okAngle);
+  ctx.closePath();
+  ctx.fillStyle = "#7bed9f";
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.arc(cx, cy, r, -Math.PI / 2 + okAngle, -Math.PI / 2 + Math.PI * 2);
+  ctx.closePath();
+  ctx.fillStyle = "#c4453c";
+  ctx.fill();
+  ctx.fillStyle = "#e8dfc8";
+  ctx.font = "12px Figtree, sans-serif";
+  const pct = Math.round((ok / total) * 100);
+  ctx.fillText(`${pct}% ок`, cx + r + 14, cy - 6);
+  ctx.fillStyle = "#b7aa8e";
+  ctx.fillText(`${ok} / ${bad}`, cx + r + 14, cy + 12);
+}
+
 function kpi(label, value) {
   return `<div class="kpi"><span>${label}</span><b>${value}</b></div>`;
 }
 
 function metaHtml(proposal, extra = "") {
   if (!proposal) return "<div>Немає даних</div>";
-  const t = proposal.treasury || {};
   const b = proposal.breakdown || {};
   const d = proposal.decision || {};
   const action = d.action || {};
   const ollama = proposal.ollama;
   const rows = [
     [`Дія`, `<strong>${actionLabel(proposal.actionName)}</strong> · ${action.op || "wait"} ${action.type || ""}`],
-    [`Крок`, `еп. ${proposal.episode ?? "—"} / ${proposal.step ?? "—"} · тік ${proposal.tick ?? "—"}`],
-    [`Скарб`, `дерево ${t.wood ?? 0} · камінь ${t.stone ?? 0} · золото ${t.gold ?? 0}`],
+    [`Крок`, `еп. ${proposal.episode ?? "—"} / ${proposal.step ?? "—"}`],
     [`Utility`, `${fmt(proposal.utility, 1)} · Δreward ${fmt(proposal.reward, 3)}`],
+    [`Розкладка`, `P ${fmt(b.P, 1)} · overlap ${fmt(b.overlap, 2)} · clog ${fmt(b.clog, 2)} · вежі ${b.towers ?? 0}`],
     [`U = E/D/S/F−W`, `${fmt(b.E, 0)} / ${fmt(b.D, 0)} / ${fmt(b.S, 0)} / ${fmt(b.F, 0)} / ${fmt(b.W, 0)}`],
-    [`Кільце`, `цілісність ${fmt((proposal.viz?.ring?.integrity ?? 0) * 100, 0)}% · дірки ${proposal.viz?.holes?.length ?? 0}`],
     [`Виконано`, proposal.executed ? "так" : "ні (no-op / маска)"],
-    [`Загроза`, `${fmt((proposal.threat || 0) * 100, 0)}%`],
   ];
   if (action.tx != null) rows.push([`Клітинка`, `${action.tx}, ${action.ty}`]);
   if (proposal.ollamaIn != null && !proposal.ollama && !proposal.ollamaPending) {
     rows.push([`Ollama`, proposal.ollamaIn === 0 ? "зараз" : `через ${proposal.ollamaIn} кроків`]);
   }
   if (proposal.skippedWait) rows.push([`Wait`, "симуляцію й Ollama пропущено"]);
+  if (proposal.ruleFail || ollama?.ruleFail) {
+    const why = proposal.ruleFail || ollama.ruleFail;
+    rows.push([`Правило`, why === "contour" ? "на контурі keep лише стіна/брама · Ollama пропущено" : "поза зоною цитаделі · Ollama пропущено"]);
+  }
   if (d.rationale) rows.push([`Чому`, d.rationale]);
   if (ollama) {
     rows.push([`Ollama`, `${fmt(ollama.score, 1)} / 10 · ${ollama.ms || 0}мс${ollama.cached ? " · cache" : ""}`]);
@@ -421,7 +459,10 @@ function renderVariant(kind, proposal) {
   const score = proposal.ollama?.score;
   if (score != null) {
     scoreEl.className = `score ${scoreClass(score)}`;
-    scoreEl.textContent = fmt(score, 1);
+    scoreEl.textContent =
+      proposal.ollama?.model === "rule" || proposal.ruleFail || proposal.ollama?.ruleFail
+        ? `правило ${fmt(score, 0)}`
+        : fmt(score, 1);
   } else {
     scoreEl.className = "score idle";
     scoreEl.textContent = kind === "prev" ? "—" : "без Ollama";
@@ -444,20 +485,32 @@ function render() {
   els.stop.disabled = !state.running;
   if (state.command) els.command.textContent = state.command;
 
-  const v = state.values;
+  const v = state.values || {};
+  const ollama = state.ollamaStats || {};
+  const last100 = ollama.verdicts || [];
+  const ok100 = last100.filter((row) => row.ok).length;
+  const bad100 = last100.length - ok100;
+  const gymNow = Math.max(state.gymSteps || 0, state.numTimesteps || 0, state.stepIndex || 0);
+  const rolloutLen = Math.max(1, (state.nSteps || 256) * (state.nEnvs || 1));
+  const intoRollout = gymNow % rolloutLen;
+  const ppoLabel = state.totalIterations
+    ? `${fmtInt(state.iteration)} / ${fmtInt(state.totalIterations)} · ${intoRollout}/${rolloutLen}`
+    : `${fmtInt(state.iteration)} · ${intoRollout}/${rolloutLen}`;
   els.kpis.innerHTML = [
-    kpi("кроки", `${fmtInt(state.numTimesteps)} / ${fmtInt(state.totalTimesteps)}`),
-    kpi("ітерація PPO", `${fmtInt(state.iteration)} / ${fmtInt(state.totalIterations) || "—"}`),
+    kpi("gym-кроки", `${fmtInt(gymNow)} / ${fmtInt(state.totalTimesteps)}`),
+    kpi("PPO оновлення", ppoLabel),
+    kpi("Ollama перевірки", `${fmtInt(ollama.ok)} ок / ${fmtInt(ollama.scores)}`),
+    kpi("останні 100", last100.length ? `${Math.round((ok100 / last100.length) * 100)}% ок` : "—"),
+    kpi("fail streak", fmtInt(ollama.failStreak)),
+    kpi("скид до core", fmtInt(ollama.resetsToCore)),
     kpi("FPS", fmt(state.fps, 1)),
     kpi("епізоди", fmtInt(state.episodes)),
     kpi("ep_rew_mean", fmt(v["rollout/ep_rew_mean"], 3)),
     kpi("останній reward", fmt(state.current?.reward, 3)),
     kpi("utility", fmt(state.current?.utility, 1)),
-    kpi("Ollama", state.ollamaStats.lastScore == null ? "—" : `${fmt(state.ollamaStats.lastScore, 1)} · ${state.ollamaStats.lastMs}мс`),
+    kpi("Ollama score", ollama.lastScore == null ? "—" : `${fmt(ollama.lastScore, 1)}${ollama.lastOk ? " ок" : ""} · ${ollama.lastMs}мс`),
     kpi("entropy", fmt(v["train/entropy_loss"], 3)),
     kpi("explained var", fmt(v["train/explained_variance"], 3)),
-    kpi("clip frac", fmt(v["train/clip_fraction"], 3)),
-    kpi("помилки Ollama", `${state.ollamaStats.errors} / ${state.ollamaStats.scores}`),
     kpi(
       "GPU",
       state.gpu?.available
@@ -487,16 +540,20 @@ function render() {
   drawChart(els.charts.reward, [{ points: state.series.reward, color: "#d7b056" }]);
   drawChart(els.charts.utility, [{ points: state.series.utility, color: "#7bed9f" }]);
   drawChart(els.charts.ollama, [{ points: state.series.ollama, color: "#70a1ff" }]);
-  drawChart(els.charts.eprew, [{ points: state.series.epRew, color: "#f0d48a" }]);
+  drawPie(els.charts.ollamaPie, ok100, bad100);
+  drawChart(els.charts.ollamaOk, [{ points: state.series.ollamaOk || [], color: "#7bed9f" }]);
+  drawChart(els.charts.eprew, [{ points: state.series.epRew, color: "#f0d48a" }], {
+    empty: "після першого епізоду (500 кроків)",
+  });
   drawChart(els.charts.loss, [
     { points: state.series.policyLoss, color: "#ff6b6b", label: "policy" },
     { points: state.series.valueLoss, color: "#70a1ff", label: "value" },
-  ], { legend: true });
+  ], { legend: true, empty: "після першого PPO оновлення (256 кроків)" });
   drawChart(els.charts.stab, [
     { points: state.series.entropy, color: "#4ecdc4", label: "entropy" },
     { points: state.series.explainedVar, color: "#7bed9f", label: "expl.var" },
     { points: state.series.clipFrac, color: "#f0d48a", label: "clip" },
-  ], { legend: true });
+  ], { legend: true, empty: "після першого PPO оновлення (256 кроків)" });
   drawChart(els.charts.gpuUtil, [{ points: state.series.gpuUtil || [], color: "#4ecdc4" }]);
   drawChart(els.charts.gpuTemp, [{ points: state.series.gpuTemp || [], color: "#ff6b6b" }]);
 

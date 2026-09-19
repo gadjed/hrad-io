@@ -3,6 +3,8 @@
  * Requires a running Ollama at host:port with the given model.
  */
 
+import { layoutQuality } from "./LayoutQuality.mjs";
+
 function baseUrl(host, port) {
   return `http://${host}:${Number(port)}`;
 }
@@ -38,6 +40,7 @@ export class OllamaEvaluator {
       return {
         score: this.cache.get(cacheKey),
         raw: "",
+        prompt: "",
         ms: 0,
         cached: true,
         error: null,
@@ -46,13 +49,14 @@ export class OllamaEvaluator {
     }
 
     const started = Date.now();
+    const prompt = this.buildPrompt(observation, decision);
     try {
       const response = await fetch(`${this.url}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: this.model,
-          prompt: this.buildPrompt(observation, decision),
+          prompt,
           stream: false,
           think: false,
           options: { temperature: 0.3, num_predict: 16 },
@@ -70,6 +74,7 @@ export class OllamaEvaluator {
       return {
         score,
         raw,
+        prompt,
         ms: Date.now() - started,
         cached: false,
         error: null,
@@ -81,6 +86,7 @@ export class OllamaEvaluator {
       return {
         score: 5.0,
         raw: "",
+        prompt,
         ms: Date.now() - started,
         cached: false,
         error: err.message || String(err),
@@ -90,26 +96,34 @@ export class OllamaEvaluator {
   }
 
   buildPrompt(obs, decision) {
-    const t = obs.treasury || {};
     const ring = obs.ring || {};
-    const nodes = obs.nearby_nodes || {};
     const action = decision.action || decision;
+    const lq = layoutQuality(obs);
+    const buildings = (obs.buildings || [])
+      .slice(0, 24)
+      .map((b) => `${b.type}@${b.tx},${b.ty}L${b.level || 1}`)
+      .join(", ");
 
-    return `Evaluate settlement development decision (score 0-10):
+    return `Score a fortress LAYOUT decision 0-10. Money is unlimited. There are no trees/ores/monsters. Judge geometry only.
+
+RULES:
+- Protection = closed wall/gate contour AND at least one tower. Open path from keep edge = 0. Walls without towers = 0. Nested contours are better.
+- Keep perimeter cells are for walls/gates only. Mills/towers/harvest must sit strictly inside, not on the outer ring, and never outside the keep.
+- Same-type harvest radii should not overlap (mill/quarry/goldmine).
+- Do not pack the keep with walls; leave courtyard.
+- One mill, one quarry, one goldmine, then towers, then a closed ring is a good opening.
+- Sell-spam or wait-spam is bad. score>7 only if the layout is actually good.
 
 STATE:
-- Resources: Wood=${t.wood || 0} Stone=${t.stone || 0} Gold=${t.gold || 0}
-- Threat: ${((obs.threat || 0) * 100).toFixed(0)}%
-- Buildings: ${(obs.buildings || []).length}
+- Buildings (${(obs.buildings || []).length}): ${buildings || "core only"}
 - Ring integrity: ${((ring.integrity || 0) * 100).toFixed(0)}%
-- Nearby: Wood=${nodes.wood || 0} Stone=${nodes.stone || 0} Gold=${nodes.gold || 0}
+- Protection P=${(lq.P || 0).toFixed(1)} overlap=${(lq.overlap || 0).toFixed(2)} clog=${(lq.clog || 0).toFixed(2)} towers=${lq.towers || 0}
 
 DECISION:
-- Mode: ${decision.mode || "n/a"}
-- Action: ${action.op || "wait"} ${action.type || ""}
-- Reasoning: ${decision.rationale || "N/A"}
+- ${action.op || "wait"} ${action.type || ""} ${action.tx != null ? `at ${action.tx},${action.ty}` : ""}
+- ${decision.rationale || ""}
 
-Rate 0-10 (resource efficiency + defense + strategy + long-term):`;
+Reply with one number 0-10.`;
   }
 
   parseScore(text) {
@@ -120,13 +134,16 @@ Rate 0-10 (resource efficiency + defense + strategy + long-term):`;
 
   hashDecision(obs, decision) {
     const action = decision.action || decision;
+    const lq = layoutQuality(obs);
     return JSON.stringify({
       mode: decision.mode,
       op: action.op,
       type: action.type,
-      threat: Math.floor((obs.threat || 0) * 4) / 4,
-      buildings: (obs.buildings || []).length,
-      gold: Math.floor((obs.treasury?.gold || 0) / 5) * 5,
+      buildings: (obs.buildings || []).map((b) => `${b.type}:${b.tx},${b.ty}`).join("|"),
+      p: Math.round((lq.P || 0) * 10) / 10,
+      overlap: Math.round((lq.overlap || 0) * 10) / 10,
+      tx: action.tx ?? null,
+      ty: action.ty ?? null,
     });
   }
 

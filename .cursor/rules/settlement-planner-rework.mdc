@@ -1,0 +1,7 @@
+---
+description: Settlement planner RL rework (L1 layout-only). Follow docs/TRAINING_REWORK_PLAN.md.
+globs: scripts/train-*.py,scripts/settlement-gym-worker.mjs,scripts/train-dashboard.mjs,server/SettlementPlanner.mjs,server/OllamaEvaluator.mjs,public/train/**,shared/train-dashboard-state.mjs,docs/TRAINING_REWORK_PLAN.md
+alwaysApply: false
+---
+
+Train **layout only** (no bot, monsters, trees, ores). Episode starts as L1 keep + core, infinite treasury. One model with two heads (action type + cell), L1 only. Ollama ok if score > 7; three consecutive failures reset to core. Protection = closed wall contour AND towers (open path or walls without towers = 0). Harvest penalty is radius overlap, not node coverage. Dashboard must show gym steps, PPO updates, and Ollama evals as three different counters. Do not start L2 or a second neural net. Full plan: `docs/TRAINING_REWORK_PLAN.md`.

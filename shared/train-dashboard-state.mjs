@@ -36,6 +36,9 @@ export function createTrainState() {
     totalIterations: 0,
     iteration: 0,
     numTimesteps: 0,
+    gymSteps: 0,
+    nSteps: 256,
+    nEnvs: 1,
     fps: 0,
     values: {},
     series: {
@@ -52,6 +55,7 @@ export function createTrainState() {
       approxKl: [],
       gpuUtil: [],
       gpuTemp: [],
+      ollamaOk: [],
     },
     gpu: {
       available: null,
@@ -70,17 +74,23 @@ export function createTrainState() {
     actionCounts: {},
     ollamaStats: {
       scores: 0,
+      ok: 0,
+      bad: 0,
       errors: 0,
       cacheHits: 0,
       lastMs: 0,
       lastScore: null,
       lastRaw: "",
+      lastOk: null,
       model: null,
+      failStreak: 0,
+      resetsToCore: 0,
+      verdicts: [],
     },
     logs: [],
     worker: {
       ollama: false,
-      ollamaFreq: 10,
+      ollamaFreq: 1,
       actions: DEFAULT_ACTION_NAMES.slice(),
       ticks: 10,
       maxSteps: 500,
@@ -122,6 +132,9 @@ export function applyTrainEvent(state, ev) {
         state.command = keepCmd;
         state.startedAt = ev.startedAt || Date.now();
         state.totalTimesteps = ev.totalTimesteps || next.totalTimesteps;
+        if (ev.totalIterations) state.totalIterations = ev.totalIterations;
+        if (ev.nSteps) state.nSteps = ev.nSteps;
+        if (ev.nEnvs) state.nEnvs = ev.nEnvs;
       } else if (ev.running) {
         state.startedAt = ev.startedAt || state.startedAt || Date.now();
         state.finishedAt = null;
@@ -132,13 +145,15 @@ export function applyTrainEvent(state, ev) {
       break;
     }
     case "train_start": {
-      state.totalTimesteps = ev.total_timesteps || state.totalTimesteps;
-      state.totalIterations = ev.total_iterations || state.totalIterations;
+      state.totalTimesteps = ev.total_timesteps ?? ev.totalTimesteps ?? state.totalTimesteps;
+      state.totalIterations = ev.total_iterations ?? ev.totalIterations ?? state.totalIterations;
+      if (ev.n_steps) state.nSteps = ev.n_steps;
+      if (ev.n_envs) state.nEnvs = ev.n_envs;
       break;
     }
     case "train_end": {
-      state.numTimesteps = ev.num_timesteps || state.numTimesteps;
-      state.iteration = ev.iteration || state.iteration;
+      if (ev.num_timesteps != null) state.numTimesteps = ev.num_timesteps;
+      if (ev.iteration != null) state.iteration = ev.iteration;
       state.running = false;
       state.finishedAt = ev.ts || Date.now();
       state.evaluating = false;
@@ -147,7 +162,7 @@ export function applyTrainEvent(state, ev) {
     case "worker_ready": {
       state.worker = {
         ollama: !!ev.ollama,
-        ollamaFreq: ev.ollamaFreq || 10,
+        ollamaFreq: ev.ollamaFreq || 1,
         actions: ev.actions || DEFAULT_ACTION_NAMES.slice(),
         ticks: ev.ticks || 10,
         maxSteps: ev.maxSteps || 500,
@@ -163,10 +178,15 @@ export function applyTrainEvent(state, ev) {
     case "episode_end": {
       state.lastEpisodeReward = num(ev.reward);
       state.lastEpisodeReason = ev.reason || null;
+      const y = num(ev.reward);
+      const x = state.gymSteps || state.stepIndex || ev.steps || 0;
+      if (y != null) pushSeries(state.series.epRew, x, y);
       break;
     }
     case "proposal": {
       state.stepIndex += 1;
+      state.gymSteps = Math.max(state.gymSteps || 0, state.stepIndex, Number(ev.gymSteps) || 0);
+      if (ev.num_timesteps != null) state.numTimesteps = Math.max(state.numTimesteps || 0, Number(ev.num_timesteps) || 0);
       state.current = ev;
       state.episodes = ev.episode || state.episodes;
       const name = ev.actionName || "wait";
@@ -203,13 +223,21 @@ export function applyTrainEvent(state, ev) {
     case "ollama_done": {
       state.evaluating = false;
       state.ollamaStats.scores += 1;
+      const ok = ev.ok === true || (ev.ok !== false && num(ev.score) != null && ev.score > 7);
+      if (ok) state.ollamaStats.ok += 1;
+      else state.ollamaStats.bad += 1;
       if (ev.error) state.ollamaStats.errors += 1;
       if (ev.cached) state.ollamaStats.cacheHits += 1;
       state.ollamaStats.lastMs = ev.ms || 0;
       state.ollamaStats.lastScore = num(ev.score);
       state.ollamaStats.lastRaw = ev.raw || "";
+      state.ollamaStats.lastOk = ok;
+      state.ollamaStats.failStreak = ev.failStreak || 0;
       if (ev.model) state.ollamaStats.model = ev.model;
+      state.ollamaStats.verdicts.push({ ts: ev.ts || Date.now(), ok, score: num(ev.score) });
+      if (state.ollamaStats.verdicts.length > 100) state.ollamaStats.verdicts.shift();
       pushSeries(state.series.ollama, ev.proposalId || state.stepIndex, num(ev.score));
+      pushSeries(state.series.ollamaOk, ev.proposalId || state.stepIndex, ok ? 1 : 0);
       if (state.current && state.current.proposalId === ev.proposalId) {
         state.current.ollamaPending = false;
         state.current.ollama = ev;
@@ -223,13 +251,25 @@ export function applyTrainEvent(state, ev) {
         };
       }
       const hit = state.history.find((row) => row.id === ev.proposalId);
-      if (hit) hit.score = ev.score;
+      if (hit) {
+        hit.score = ev.score;
+        hit.ok = ok;
+      }
       break;
     }
-    case "metrics": {
-      state.iteration = ev.iteration || state.iteration;
-      state.totalIterations = ev.total_iterations || state.totalIterations;
-      state.numTimesteps = ev.num_timesteps || state.numTimesteps;
+    case "reset_to_core": {
+      state.ollamaStats.resetsToCore += 1;
+      state.ollamaStats.failStreak = 0;
+      break;
+    }
+    case "metrics":
+    case "progress": {
+      if (ev.iteration != null) state.iteration = ev.iteration;
+      if (ev.total_iterations != null) state.totalIterations = ev.total_iterations;
+      if (ev.num_timesteps != null) {
+        state.numTimesteps = ev.num_timesteps;
+        state.gymSteps = Math.max(state.gymSteps || 0, ev.num_timesteps);
+      }
       const values = ev.values || {};
       state.values = { ...state.values, ...values };
       const t = state.numTimesteps || state.iteration;

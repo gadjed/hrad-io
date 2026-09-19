@@ -50,6 +50,7 @@ import {
   capStock,
   capCoins,
 } from "../shared/defs.mjs";
+import { contourPlaceReason } from "./LayoutQuality.mjs";
 import { NpcBrain } from "./NpcBrain.mjs";
 import { MonsterBrain } from "./MonsterBrain.mjs";
 import { BotBrain } from "./BotBrain.mjs";
@@ -103,6 +104,8 @@ export class World {
     this.bots = new Map();
     this._npcFactionSeq = null;
     this._botSeq = 0;
+    this._designGym = false;
+    this._infiniteTreasury = false;
   }
 
   generate() {
@@ -112,6 +115,55 @@ export class World {
       this.spawnMonsters();
       this.spawnWorldBots();
     }
+  }
+
+  /**
+   * Empty L1 keep for layout gym: one NPC faction, only a core, no nodes/mobs/bots.
+   * @returns {string} faction id
+   */
+  placeBareNpcKeep({ tx = 79, ty = 79, level = 1 } = {}) {
+    this._designGym = true;
+    const factionId = this.nextNpcFactionId();
+    const faction = {
+      id: factionId,
+      name: "design-l1",
+      npc: true,
+      color: "#c4453c",
+      core: null,
+      stock: emptyStock(),
+      threat: 0,
+      recruitAt: 0,
+      job: null,
+      desire: "economy",
+      plannerLocked: true,
+    };
+    this.factions.set(factionId, faction);
+    const core = this.createBuilding({
+      type: "core",
+      tx,
+      ty,
+      rot: 0,
+      ownerId: factionId,
+      team: factionId,
+      level: level || 1,
+    });
+    if (!core) {
+      this.factions.delete(factionId);
+      throw new Error("placeBareNpcKeep: core rejected");
+    }
+    faction.core = core.id;
+    this.ensureFaction(faction);
+    this.rebuildOccupancy();
+    return factionId;
+  }
+
+  stripSettlementToCore(settlementId) {
+    for (const b of [...this.buildings.values()]) {
+      if ((b.team === settlementId || b.ownerId === settlementId) && b.type !== "core") {
+        this.destroyBuilding(b, false);
+      }
+    }
+    this.rebuildOccupancy();
   }
 
   scatterNodes() {
@@ -1651,7 +1703,20 @@ export class World {
         return null;
       }
     }
-    const free = this.mode === "sandbox" && this.players.has(actor.id);
+    if (this._designGym && type !== "core") {
+      const core = this.factionCore(actor.id) || this.playerCore(actor.id);
+      const keep = core ? this.keepForCore(core) : null;
+      const reason = contourPlaceReason(keep, type, fp, { contourWallsOnly: true });
+      if (reason === "outside_keep") {
+        note("Поза зоною цитаделі");
+        return null;
+      }
+      if (reason === "contour") {
+        note("На контурі keep лише стіна або брама");
+        return null;
+      }
+    }
+    const free = (this.mode === "sandbox" && this.players.has(actor.id)) || !!this._infiniteTreasury;
     const wallet = this.buildWallet(actor);
     if (!canAfford(wallet, def.cost, free)) {
       note(type === "core" || !this.playerCore(actor.id) ? "Не вистачає ресурсів у рюкзаку" : "Не вистачає в скарбниці");
@@ -1704,7 +1769,7 @@ export class World {
     }
     const def = BUILDINGS[b.type];
     const cost = upgradeCost(def, b.level);
-    const free = this.mode === "sandbox" && this.players.has(actorId);
+    const free = (this.mode === "sandbox" && this.players.has(actorId)) || !!this._infiniteTreasury;
     const wallet = this.buildWallet(actor);
     if (!canAfford(wallet, cost, free)) {
       if (!quiet && this.players.has(actorId)) {
@@ -1748,7 +1813,7 @@ export class World {
     }
     const def = BUILDINGS[b.type];
     const cost = repairCost(def, b.level);
-    const free = this.mode === "sandbox" && this.players.has(actorId);
+    const free = (this.mode === "sandbox" && this.players.has(actorId)) || !!this._infiniteTreasury;
     const wallet = this.buildWallet(actor);
     if (!canAfford(wallet, cost, free)) {
       if (!quiet && this.players.has(actorId)) {

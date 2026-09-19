@@ -88,12 +88,14 @@ function buildArgs(cfg = {}) {
   flag("--learning-rate", cfg.learningRate, 3e-4);
   flag("--ticks", cfg.ticks, 10);
   flag("--max-steps", cfg.maxSteps, 500);
-  flag("--ollama-freq", cfg.ollamaFreq, 10);
+  flag("--ollama-freq", cfg.ollamaFreq, 1);
   flag("--ollama-host", cfg.ollamaHost, "localhost");
   flag("--ollama-port", cfg.ollamaPort, 11434);
   flag("--ollama-model", cfg.ollamaModel, "gemma4:e4b");
   if (cfg.noEval !== false) args.push("--no-eval");
   if (cfg.useOllama !== false) args.push("--use-ollama");
+  if (cfg.resume) args.push("--resume");
+  args.push("--output", "models/rl_agent/L1");
   args.push("--dash", `http://${HOST}:${PORT}`);
   return args;
 }
@@ -134,6 +136,9 @@ function startTraining(cfg = {}) {
     TRAIN_DASH_URL: `http://${HOST}:${PORT}`,
     PYTHONUNBUFFERED: "1",
   };
+  const nSteps = Number(cfg.nSteps) || 256;
+  const nEnvs = Number(cfg.nEnvs) || 1;
+  const timesteps = Number(cfg.timesteps) || 1_000_000;
   ingest({
     type: "train_proc",
     running: true,
@@ -141,7 +146,10 @@ function startTraining(cfg = {}) {
     pid: null,
     command,
     startedAt: Date.now(),
-    totalTimesteps: Number(cfg.timesteps) || 1_000_000,
+    totalTimesteps: timesteps,
+    totalIterations: Math.max(1, Math.ceil(timesteps / (nSteps * nEnvs))),
+    nSteps,
+    nEnvs,
     ts: Date.now(),
   });
   try {
@@ -205,7 +213,7 @@ app.get("/api/defaults", (_req, res) => {
     ticks: 10,
     maxSteps: 500,
     useOllama: true,
-    ollamaFreq: 10,
+    ollamaFreq: 1,
     ollamaHost: process.env.OLLAMA_HOST || "localhost",
     ollamaPort: Number(process.env.OLLAMA_PORT || 11434),
     ollamaModel: process.env.OLLAMA_MODEL || "gemma4:e4b",

@@ -5,19 +5,25 @@
  * Logs go to stderr only.
  */
 import readline from "node:readline";
-import { TILE, NPC_FACTION, dist2 } from "../shared/defs.mjs";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { PrototypeStore } from "../server/PrototypeStore.mjs";
 import { World } from "../server/World.mjs";
 import { OllamaEvaluator } from "../server/OllamaEvaluator.mjs";
 import {
   ACTION_COUNT,
   ACTION_NAMES,
+  CELL_COUNT,
+  GRID_CH,
+  KEEP_N,
   OBS_DIM,
   clipReward,
   executeDecision,
   lockNpcBrains,
   observe,
   parameterizeAction,
+  parameterizeActionAt,
   pickNpcSettlement,
   utilityBreakdown,
 } from "../server/SettlementPlanner.mjs";
@@ -32,12 +38,23 @@ function envFlag(name) {
   return v === "1" || v === "true" || v === "yes";
 }
 
+function envFlagDefault(name, fallback) {
+  if (process.env[name] == null || process.env[name] === "") return fallback;
+  return envFlag(name);
+}
+
 const TICKS = envInt("SETTLEMENT_GYM_TICKS", 10);
 const MAX_STEPS = envInt("SETTLEMENT_GYM_MAX_STEPS", 500);
 const USE_OLLAMA = envFlag("SETTLEMENT_GYM_USE_OLLAMA");
-const OLLAMA_FREQ = envInt("SETTLEMENT_GYM_OLLAMA_FREQ", 10);
+const OLLAMA_FREQ = envInt("SETTLEMENT_GYM_OLLAMA_FREQ", 1);
 const ENV_ID = String(process.env.SETTLEMENT_GYM_ENV_ID || "0");
 const DASH_URL = String(process.env.TRAIN_DASH_URL || "").replace(/\/$/, "");
+const DESIGN = envFlagDefault("SETTLEMENT_GYM_DESIGN", true);
+const INFINITE = envFlagDefault("SETTLEMENT_GYM_INFINITE_TREASURY", true);
+const OLLAMA_OK = 7;
+const OLLAMA_SAMPLE_EVERY = envInt("SETTLEMENT_GYM_OLLAMA_SAMPLE", 10);
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const OLLAMA_LOG_DIR = path.join(ROOT, "logs", "ollama");
 
 function send(obj) {
   process.stdout.write(`${JSON.stringify(obj)}\n`);
@@ -45,6 +62,17 @@ function send(obj) {
 
 function log(...args) {
   console.error("[gym-worker]", ...args);
+}
+
+function appendOllamaSample(record) {
+  try {
+    fs.mkdirSync(OLLAMA_LOG_DIR, { recursive: true });
+    const day = new Date().toISOString().slice(0, 10);
+    const file = path.join(OLLAMA_LOG_DIR, `${day}.jsonl`);
+    fs.appendFileSync(file, `${JSON.stringify(record)}\n`);
+  } catch (err) {
+    log("ollama sample write failed", err.message);
+  }
 }
 
 function dashEmit(event) {
@@ -57,26 +85,8 @@ function dashEmit(event) {
       ts: Date.now(),
       envId: ENV_ID,
     }),
-    signal: AbortSignal.timeout(200),
+    signal: AbortSignal.timeout(5000),
   }).catch(() => {});
-}
-
-function nearbyNodesViz(world, settlementId) {
-  const core = world.factionCore(settlementId);
-  if (!core) return [];
-  const scan2 = NPC_FACTION.harvestScan * NPC_FACTION.harvestScan;
-  const nodes = [];
-  for (const n of world.nodes.values()) {
-    if (!n.alive) continue;
-    if (dist2(n.x, n.y, core.x, core.y) > scan2) continue;
-    nodes.push({
-      kind: n.kind,
-      tx: Math.floor(n.x / TILE),
-      ty: Math.floor(n.y / TILE),
-    });
-    if (nodes.length >= 80) break;
-  }
-  return nodes;
 }
 
 function packHighlight(observation, decision) {
@@ -103,8 +113,7 @@ function packHighlight(observation, decision) {
   return { kind: "none", tx: null, ty: null, buildingId: null, type: null };
 }
 
-function packViz(world, settlementId, observation, decision) {
-  const ring = observation.ring || null;
+function packViz(observation, decision) {
   return {
     keep: observation.keep || null,
     core: observation.core || null,
@@ -119,17 +128,6 @@ function packViz(world, settlementId, observation, decision) {
       max_hp: b.max_hp,
       level: b.level,
     })),
-    holes: (ring?.holes || []).map((h) => ({ tx: h.tx, ty: h.ty, gate: !!h.gate })),
-    ring: ring
-      ? {
-          x0: ring.x0,
-          y0: ring.y0,
-          x1: ring.x1,
-          y1: ring.y1,
-          integrity: ring.integrity,
-        }
-      : null,
-    nodes: nearbyNodesViz(world, settlementId),
     highlight: packHighlight(observation, decision),
   };
 }
@@ -148,7 +146,9 @@ function compactBreakdown(full) {
     harvestZero: full.harvestZero,
     coreRatio: full.coreRatio,
     wallHp: full.wallHp,
-    cov: full.cov,
+    P: full.P,
+    overlap: full.overlap,
+    clog: full.clog,
   };
 }
 
@@ -162,6 +162,10 @@ class GymSession {
     this.episodeReward = 0;
     this.prevUtility = 0;
     this.proposalId = 0;
+    this.gymSteps = 0;
+    this.failStreak = 0;
+    this.sellStreak = 0;
+    this.ollamaCalls = 0;
     this.ollama = USE_OLLAMA
       ? new OllamaEvaluator({
           host: process.env.OLLAMA_HOST || "localhost",
@@ -174,7 +178,7 @@ class GymSession {
   async init() {
     this.store = new PrototypeStore();
     await this.store.init();
-    log(`ready · ticks=${TICKS} max_steps=${MAX_STEPS} ollama=${USE_OLLAMA ? "on" : "off"}`);
+    log(`ready · ticks=${TICKS} max_steps=${MAX_STEPS} ollama=${USE_OLLAMA ? "on" : "off"} design=${DESIGN ? "on" : "off"}`);
     void dashEmit({
       type: "worker_ready",
       actions: ACTION_NAMES,
@@ -183,14 +187,23 @@ class GymSession {
       ticks: TICKS,
       maxSteps: MAX_STEPS,
       model: this.ollama?.model || null,
+      keepN: KEEP_N,
+      gridCh: GRID_CH,
+      twoHead: true,
     });
   }
 
   async freshWorld() {
     const world = new World({ mode: "world", prototypes: this.store });
     world._silent = true;
-    world.generate();
-    world.rebuildOccupancy();
+    if (DESIGN) {
+      world._designGym = true;
+      world._infiniteTreasury = INFINITE;
+      world.placeBareNpcKeep({ tx: 79, ty: 79, level: 1 });
+    } else {
+      world.generate();
+      world.rebuildOccupancy();
+    }
     lockNpcBrains(world);
     return world;
   }
@@ -199,7 +212,9 @@ class GymSession {
     const packed = observe(this.world, this.settlementId);
     return {
       obs: packed.obs,
+      grid: packed.grid,
       mask: packed.mask,
+      cellMask: packed.cellMask,
       observation: packed.observation,
       utility: packed.utility,
     };
@@ -214,6 +229,8 @@ class GymSession {
     this.stepCount = 0;
     this.episode += 1;
     this.episodeReward = 0;
+    this.failStreak = 0;
+    this.sellStreak = 0;
     const snap = this.snapshot();
     this.prevUtility = snap.utility;
     const breakdown = compactBreakdown(utilityBreakdown(snap.observation));
@@ -223,16 +240,15 @@ class GymSession {
       settlementId: this.settlementId,
       utility: snap.utility,
       breakdown,
-      treasury: snap.observation.treasury,
-      threat: snap.observation.threat,
-      tick: this.world.tick,
       buildings: snap.observation.buildings.length,
-      viz: packViz(this.world, this.settlementId, snap.observation, null),
+      viz: packViz(snap.observation, null),
     });
     return {
       ok: true,
       obs: snap.obs,
+      grid: snap.grid,
       mask: snap.mask,
+      cellMask: snap.cellMask,
       info: {
         settlement_id: this.settlementId,
         utility: snap.utility,
@@ -242,7 +258,7 @@ class GymSession {
     };
   }
 
-  async step(actionIndex) {
+  async step(actionIndex, cellIndex = null) {
     if (!this.world || !this.settlementId) {
       throw new Error("step before reset");
     }
@@ -251,7 +267,12 @@ class GymSession {
       throw new Error(`invalid action ${actionIndex}`);
     }
 
-    const decision = parameterizeAction(this.world, this.settlementId, idx) || {
+    const useCell = cellIndex != null && Number.isInteger(Number(cellIndex));
+    const decision = (
+      useCell
+        ? parameterizeActionAt(this.world, this.settlementId, idx, Number(cellIndex))
+        : parameterizeAction(this.world, this.settlementId, idx)
+    ) || {
       mode: "wait",
       action: { op: "wait", building_id: null, type: null, tx: null, ty: null, rot: null },
       queue: [],
@@ -259,12 +280,14 @@ class GymSession {
       rationale: "invalid masked as wait",
     };
     const executed = executeDecision(this.world, this.settlementId, decision);
-    const isWait = idx === 0 || (decision.action?.op || "wait") === "wait";
+    const illegal = decision.illegal || null;
+    const isWait = !illegal && (idx === 0 || (decision.action?.op || "wait") === "wait");
 
-    if (!isWait) {
+    if (!isWait && !DESIGN) {
       for (let i = 0; i < TICKS; i++) this.world.step();
     }
     this.stepCount++;
+    this.gymSteps += 1;
 
     const snap = this.snapshot();
     const coreGone = !this.world.factionCore(this.settlementId);
@@ -274,10 +297,23 @@ class GymSession {
 
     const rewardGame = clipReward((snap.utility - this.prevUtility) / 80);
     let reward = rewardGame;
-    if (!executed && idx !== 0) reward = clipReward(reward - 0.02);
+    if (illegal) reward = clipReward(-0.7);
+    else if (!executed && idx !== 0) reward = clipReward(reward - (useCell ? 0.08 : 0.02));
     this.prevUtility = snap.utility;
 
-    const ollamaDue = !!(!isWait && this.ollama && this.stepCount % OLLAMA_FREQ === 0);
+    if (executed && decision.action?.op === "sell") this.sellStreak += 1;
+    else if (executed && decision.action?.op === "place") this.sellStreak = 0;
+
+    let stripped = false;
+    if (this.sellStreak >= 3) {
+      this.world.stripSettlementToCore(this.settlementId);
+      this.sellStreak = 0;
+      this.failStreak = 0;
+      stripped = true;
+      void dashEmit({ type: "reset_to_core", reason: "sell_streak", episode: this.episode, step: this.stepCount });
+    }
+
+    const ollamaDue = !!(!illegal && !isWait && executed && this.ollama && this.stepCount % OLLAMA_FREQ === 0);
     const proposalId = ++this.proposalId;
     const actionName = ACTION_NAMES[idx];
     const legal = [];
@@ -288,6 +324,7 @@ class GymSession {
     const proposal = {
       type: "proposal",
       proposalId,
+      gymSteps: this.gymSteps,
       episode: this.episode,
       step: this.stepCount,
       settlementId: this.settlementId,
@@ -299,9 +336,6 @@ class GymSession {
       reward,
       utility: snap.utility,
       breakdown,
-      treasury: snap.observation.treasury,
-      threat: snap.observation.threat,
-      enemiesNearby: !!snap.observation.enemies_nearby,
       buildings: snap.observation.buildings.length,
       legal,
       decision: {
@@ -309,14 +343,42 @@ class GymSession {
         action: decision.action,
         rationale: decision.rationale || "",
       },
-      viz: packViz(this.world, this.settlementId, snap.observation, decision),
+      viz: packViz(snap.observation, decision),
       ollamaPending: ollamaDue,
       ollamaIn: this.ollama ? (OLLAMA_FREQ - (this.stepCount % OLLAMA_FREQ)) % OLLAMA_FREQ : null,
       skippedWait: isWait,
+      ruleFail: illegal,
     };
     void dashEmit(proposal);
 
-    if (ollamaDue) {
+    if (illegal) {
+      this.failStreak += 1;
+      if (this.failStreak >= 3) {
+        this.world.stripSettlementToCore(this.settlementId);
+        this.failStreak = 0;
+        this.sellStreak = 0;
+        stripped = true;
+        void dashEmit({ type: "reset_to_core", reason: illegal, episode: this.episode, step: this.stepCount });
+      }
+      await dashEmit({
+        type: "ollama_done",
+        proposalId,
+        actionName,
+        score: 0,
+        ok: false,
+        raw: illegal === "contour" ? "contour_walls_only" : "outside_keep",
+        ms: 0,
+        cached: true,
+        error: null,
+        model: "rule",
+        reward,
+        rewardGame,
+        ollamaReward: -1,
+        failStreak: this.failStreak,
+        resetToCore: stripped,
+        ruleFail: illegal,
+      });
+    } else if (ollamaDue) {
       await dashEmit({
         type: "ollama_start",
         proposalId,
@@ -326,13 +388,57 @@ class GymSession {
         step: this.stepCount,
       });
       const ev = await this.ollama.evaluateDetailed(snap.observation, decision);
+      const ok = ev.score > OLLAMA_OK;
       const ollamaReward = (ev.score - 5) / 5;
       reward = clipReward(0.7 * reward + 0.3 * ollamaReward);
-      void dashEmit({
+      if (ok) this.failStreak = 0;
+      else this.failStreak += 1;
+      if (this.failStreak >= 3) {
+        this.world.stripSettlementToCore(this.settlementId);
+        this.failStreak = 0;
+        this.sellStreak = 0;
+        stripped = true;
+        void dashEmit({ type: "reset_to_core", reason: "ollama_fail_streak", episode: this.episode, step: this.stepCount });
+      }
+      if (!ev.cached) {
+        this.ollamaCalls += 1;
+        if (this.ollamaCalls % OLLAMA_SAMPLE_EVERY === 0) {
+          appendOllamaSample({
+            ts: Date.now(),
+            n: this.ollamaCalls,
+            envId: ENV_ID,
+            episode: this.episode,
+            step: this.stepCount,
+            gymSteps: this.gymSteps,
+            proposalId,
+            actionName,
+            executed,
+            ok,
+            score: ev.score,
+            ms: ev.ms,
+            model: ev.model,
+            error: ev.error,
+            prompt: ev.prompt || "",
+            response: ev.raw || "",
+            decision: decision.action || null,
+            rationale: decision.rationale || "",
+            buildings: (snap.observation.buildings || []).map((b) => ({
+              type: b.type,
+              tx: b.tx,
+              ty: b.ty,
+              w: b.w,
+              h: b.h,
+              level: b.level,
+            })),
+          });
+        }
+      }
+      await dashEmit({
         type: "ollama_done",
         proposalId,
         actionName,
         score: ev.score,
+        ok,
         raw: ev.raw,
         ms: ev.ms,
         cached: ev.cached,
@@ -341,7 +447,19 @@ class GymSession {
         reward,
         rewardGame,
         ollamaReward,
+        failStreak: this.failStreak,
+        resetToCore: stripped,
       });
+    }
+
+    if (stripped) {
+      const after = this.snapshot();
+      this.prevUtility = after.utility;
+      snap.obs = after.obs;
+      snap.grid = after.grid;
+      snap.mask = after.mask;
+      snap.cellMask = after.cellMask;
+      snap.utility = after.utility;
     }
 
     this.episodeReward += reward;
@@ -359,7 +477,9 @@ class GymSession {
     return {
       ok: true,
       obs: snap.obs,
+      grid: snap.grid,
       mask: snap.mask,
+      cellMask: snap.cellMask,
       reward,
       done,
       truncated,
@@ -370,6 +490,7 @@ class GymSession {
         executed,
         action: actionName,
         op: decision.action?.op || "wait",
+        cell: useCell ? Number(cellIndex) : null,
       },
     };
   }
@@ -398,7 +519,7 @@ async function main() {
         return;
       }
       if (msg.cmd === "step") {
-        send(await session.step(msg.action));
+        send(await session.step(msg.action, msg.cell));
         return;
       }
       if (msg.cmd === "close") {
@@ -406,7 +527,15 @@ async function main() {
         process.exit(0);
       }
       if (msg.cmd === "spec") {
-        send({ ok: true, obs_dim: OBS_DIM, action_count: ACTION_COUNT, names: ACTION_NAMES });
+        send({
+          ok: true,
+          obs_dim: OBS_DIM,
+          action_count: ACTION_COUNT,
+          keep_n: KEEP_N,
+          grid_ch: GRID_CH,
+          cell_count: CELL_COUNT,
+          names: ACTION_NAMES,
+        });
         return;
       }
       send({ ok: false, error: `unknown cmd ${msg.cmd}` });

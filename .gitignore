@@ -6,6 +6,8 @@ data/world.sqlite-wal
 data/world.sqlite-shm
 data/training/
 models/
+logs/
 venv/
 __pycache__/
+*.pyc
 
